@@ -28,7 +28,7 @@ Future<Uint8List> generateIndic(PdfPageFormat format, CustomData data) async {
   final fontBase =
       data.testing ? pw.Font.helvetica() : await PdfGoogleFonts.notoSansRegular();
 
-  final Map<String, pw.Font> fonts = data.testing
+  final fonts = data.testing
       ? {}
       : {
           'Hindi': await PdfGoogleFonts.notoSansDevanagariRegular(),

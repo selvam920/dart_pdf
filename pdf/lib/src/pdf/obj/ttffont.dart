@@ -173,14 +173,15 @@ class PdfTtfFont extends PdfFont {
   void putText(PdfStream stream, String text) {
     if (!font.unicode) {
       super.putText(stream, text);
+      return;
     }
 
     var charIndexes = getCharIndexes(text.runes);
-    charIndexes = indicShaper(charIndexes, font);
-    final runes = charIndexes;
+    final codepoints = text.runes.toList();
+    charIndexes = indicShaper(charIndexes, font, codepoints);
 
     stream.putByte(0x3c);
-    for (final rune in runes) {
+    for (final rune in charIndexes) {
       var char = unicodeCMap.cmap.indexOf(rune);
       if (char == -1) {
         char = unicodeCMap.cmap.length;
@@ -198,11 +199,11 @@ class PdfTtfFont extends PdfFont {
       return super.stringMetrics(s, letterSpacing: letterSpacing);
     }
 
-    final runes = s.runes;
-    final bytes = <int>[];
-    runes.forEach(bytes.add);
+    var charIndexes = getCharIndexes(s.runes);
+    final codepoints = s.runes.toList();
+    charIndexes = indicShaper(charIndexes, font, codepoints);
 
-    final metrics = bytes.map(glyphMetrics);
+    final metrics = charIndexes.map((g) => glyphMetrics(g, true));
     return PdfFontMetrics.append(metrics, letterSpacing: letterSpacing);
   }
 
