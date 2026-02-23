@@ -7,6 +7,7 @@ import 'data.dart';
 import 'examples/calendar.dart';
 import 'examples/certificate.dart';
 import 'examples/document.dart';
+import 'examples/indic.dart';
 import 'examples/invoice.dart';
 import 'examples/report.dart';
 import 'examples/resume.dart';
@@ -17,6 +18,7 @@ const examples = <Example>[
   Example('INVOICE', 'invoice.dart', generateInvoice),
   Example('REPORT', 'report.dart', generateReport),
   Example('CALENDAR', 'calendar.dart', generateCalendar),
+  Example('INDIC', 'indic.dart', generateIndic),
   Example('CERTIFICATE', 'certificate.dart', generateCertificate, true),
 ];
 

@@ -40,7 +40,6 @@ class MyApp extends StatefulWidget {
 
 class MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   int _tab = 0;
-  TabController? _tabController;
 
   PrintingInfo? printingInfo;
 
@@ -61,31 +60,6 @@ class MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
 
   Future<void> _init() async {
     final info = await Printing.info();
-
-    _tabController = TabController(
-      vsync: this,
-      length: examples.length,
-      initialIndex: _tab,
-    );
-    _tabController!.addListener(() {
-      if (_tab != _tabController!.index) {
-        setState(() {
-          _tab = _tabController!.index;
-        });
-      }
-      if (examples[_tab].needsData && !_hasData && !_pending) {
-        _pending = true;
-        askName(context).then((value) {
-          if (value != null) {
-            setState(() {
-              _data = CustomData(name: value);
-              _hasData = true;
-              _pending = false;
-            });
-          }
-        });
-      }
-    });
 
     setState(() {
       printingInfo = info;
@@ -127,10 +101,6 @@ class MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     pw.RichText.debug = true;
 
-    if (_tabController == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     final actions = <PdfPreviewAction>[
       if (!kIsWeb)
         PdfPreviewAction(
@@ -139,26 +109,48 @@ class MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
         )
     ];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Flutter PDF Demo'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: examples.map<Tab>((e) => Tab(text: e.name)).toList(),
-          isScrollable: true,
+    return DefaultTabController(
+      length: examples.length,
+      initialIndex: _tab,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Flutter PDF Demo'),
+          bottom: TabBar(
+            onTap: (int index) {
+              if (_tab != index) {
+                setState(() {
+                  _tab = index;
+                });
+              }
+              if (examples[index].needsData && !_hasData && !_pending) {
+                _pending = true;
+                askName(context).then((value) {
+                  if (value != null) {
+                    setState(() {
+                      _data = CustomData(name: value);
+                      _hasData = true;
+                      _pending = false;
+                    });
+                  }
+                });
+              }
+            },
+            tabs: examples.map<Tab>((e) => Tab(text: e.name)).toList(),
+            isScrollable: true,
+          ),
         ),
-      ),
-      body: PdfPreview(
-        maxPageWidth: 700,
-        build: (format) => examples[_tab].builder(format, _data),
-        actions: actions,
-        onPrinted: _showPrintedToast,
-        onShared: _showSharedToast,
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.deepOrange,
-        onPressed: _showSources,
-        child: const Icon(Icons.code),
+        body: PdfPreview(
+          maxPageWidth: 700,
+          build: (format) => examples[_tab].builder(format, _data),
+          actions: actions,
+          onPrinted: _showPrintedToast,
+          onShared: _showSharedToast,
+        ),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: Colors.deepOrange,
+          onPressed: _showSources,
+          child: const Icon(Icons.code),
+        ),
       ),
     );
   }

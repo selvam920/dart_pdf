@@ -184,8 +184,11 @@ class TtfWriter {
         continue;
       }
       final len = ttf.tableSize[tn]!;
-      final data = Uint8List.fromList(
-          ttf.bytes.buffer.asUint8List(start, _wordAlign(len)));
+      final sourceLen = math.min(len, ttf.bytes.lengthInBytes - start);
+      final dataView = ttf.bytes.buffer
+          .asUint8List(ttf.bytes.offsetInBytes + start, sourceLen);
+      final data = Uint8List(_wordAlign(len));
+      data.setRange(0, sourceLen, dataView);
       tables[tn] = data;
       tablesLength[tn] = len;
     }
@@ -206,9 +209,15 @@ class TtfWriter {
     {
       // post Table
       final start = ttf.tableOffsets[TtfParser.post_table]!;
+      final oldLen = ttf.tableSize[TtfParser.post_table]!;
       const len = 32;
-      final data = Uint8List.fromList(
-          ttf.bytes.buffer.asUint8List(start, _wordAlign(len)));
+      final sourceLen = math.min(oldLen, ttf.bytes.lengthInBytes - start);
+      final data = Uint8List(_wordAlign(len));
+      data.setRange(
+          0,
+          math.min(len, sourceLen),
+          ttf.bytes.buffer
+              .asUint8List(ttf.bytes.offsetInBytes + start, sourceLen));
       data.buffer.asByteData().setUint32(0, 0x00030000); // Version 3.0 no names
       tables[TtfParser.post_table] = data;
       tablesLength[TtfParser.post_table] = len;

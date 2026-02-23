@@ -99,7 +99,8 @@ class PdfTtfFont extends PdfFont {
     int charMin;
     int charMax;
 
-    file.buf.putBytes(font.bytes.buffer.asUint8List());
+    file.buf.putBytes(font.bytes.buffer
+        .asUint8List(font.bytes.offsetInBytes, font.bytes.lengthInBytes));
     file.params['/Length1'] = PdfNum(font.bytes.lengthInBytes);
 
     params['/BaseFont'] = PdfName('/$fontName');

@@ -277,12 +277,12 @@ class LookupFlag {
   static LookupFlag parse(ByteData data, int offset) {
     final markAttachmentType = data.getUint8(offset + 1);
     final bitFlag = data.getUint8(offset + 2);
-    final bitString = bitFlag.toRadixString(2).padLeft(4, '0');
     final flags = <String, bool>{
-      'rightToLeft': bitString[3] == '1',
-      'ignoreBaseGlyphs': bitString[2] == '1',
-      'ignoreLigatures': bitString[1] == '1',
-      'ignoreMarks': bitString[0] == '1',
+      'rightToLeft': (bitFlag & 0x01) != 0,
+      'ignoreBaseGlyphs': (bitFlag & 0x02) != 0,
+      'ignoreLigatures': (bitFlag & 0x04) != 0,
+      'ignoreMarks': (bitFlag & 0x08) != 0,
+      'useMarkFilteringSet': (bitFlag & 0x10) != 0,
     };
     return LookupFlag(markAttachmentType, bitFlag, flags);
   }
@@ -325,7 +325,7 @@ class SingleSubstitution {
       pointer += 2;
 
       if (glyphCount > 0) {
-        final substitute = <int>[];
+        substitute = <int>[];
         var substituteOffset = offset + pointer;
         for (var i = 0; i < glyphCount; i++) {
           substitute.add(data.getUint16(substituteOffset));
@@ -813,12 +813,12 @@ class ChainRuleSets {
     final chainRules = <ChainRule>[];
     if (chainRuleCount > 0) {
       final chainRuleBase = offset + pointer;
-      var chainRuleOffset = offset + data.getUint16(chainRuleBase);
+      pointer += chainRuleCount * 2;
       for (var i = 0; i < chainRuleCount; i++) {
+        final chainRuleOffset =
+            offset + data.getUint16(chainRuleBase + 2 * i);
         final rule = ChainRule.parse(data, chainRuleOffset);
         chainRules.add(rule);
-        chainRuleOffset += rule.pointer;
-        pointer += rule.pointer;
       }
     }
 
@@ -1132,8 +1132,10 @@ class SubTable {
         // default:
         // throw UnsupportedError("Unsupported lookupType: $lookupType");
       }
-    } catch (e) {
-      print(e);
+    } catch (e, stack) {
+      print('GSUB SubTable parse error: lookupType=$lookupType offset=$offset '
+          'dataLength=${data.lengthInBytes}: $e');
+      print(stack);
     }
 
     // Add parsing logic based on subTableFormat
@@ -1167,10 +1169,16 @@ class LookupList {
 class GsubTableParser {
   // https://www.microsoft.com/typography/OTSPEC/gsub.htm
   GsubTableParser({required this.data, this.startPosition = 0}) {
-    gsubHeader = GsubHeader.parse(data, startPosition);
-    scriptList = ScriptList.parse(data, gsubHeader);
-    featureList = FeatureList.parse(data, gsubHeader);
-    lookupList = LookupList.parse(data, gsubHeader.lookupListOffset);
+    try {
+      gsubHeader = GsubHeader.parse(data, startPosition);
+      scriptList = ScriptList.parse(data, gsubHeader);
+      featureList = FeatureList.parse(data, gsubHeader);
+      lookupList = LookupList.parse(data, gsubHeader.lookupListOffset);
+    } catch (e, stack) {
+      print('Error parsing GSUB table: $e');
+      print(stack);
+      rethrow;
+    }
   }
   final ByteData data;
   final int startPosition;

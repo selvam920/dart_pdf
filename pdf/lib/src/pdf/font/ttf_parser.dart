@@ -122,50 +122,63 @@ class TtfBitmapInfo {
 
 class TtfParser {
   TtfParser(this.bytes) {
-    final numTables = bytes.getUint16(4);
+    try {
+      final numTables = bytes.getUint16(4);
 
-    for (var i = 0; i < numTables; i++) {
-      final name = utf8.decode(bytes.buffer.asUint8List(i * 16 + 12, 4));
-      final offset = bytes.getUint32(i * 16 + 20);
-      final size = bytes.getUint32(i * 16 + 24);
-      tableOffsets[name] = offset;
-      tableSize[name] = size;
-    }
+      for (var i = 0; i < numTables; i++) {
+        final name = utf8.decode(bytes.buffer
+            .asUint8List(bytes.offsetInBytes + i * 16 + 12, 4));
+        final offset = bytes.getUint32(i * 16 + 20);
+        final size = bytes.getUint32(i * 16 + 24);
 
-    assert(tableOffsets.containsKey(head_table),
-        'Unable to find the `head` table. This file is not a supported TTF font');
-    assert(tableOffsets.containsKey(name_table),
-        'Unable to find the `name` table. This file is not a supported TTF font');
-    assert(tableOffsets.containsKey(hmtx_table),
-        'Unable to find the `hmtx` table. This file is not a supported TTF font');
-    assert(tableOffsets.containsKey(hhea_table),
-        'Unable to find the `hhea` table. This file is not a supported TTF font');
-    assert(tableOffsets.containsKey(cmap_table),
-        'Unable to find the `cmap` table. This file is not a supported TTF font');
-    assert(tableOffsets.containsKey(maxp_table),
-        'Unable to find the `maxp` table. This file is not a supported TTF font');
+        if (offset + size > bytes.lengthInBytes) {
+          print(
+              'Warning: Table $name is at $offset with size $size, but font buffer only has ${bytes.lengthInBytes} bytes');
+        }
 
-    _parseCMap();
-    if (tableOffsets.containsKey(loca_table) &&
-        tableOffsets.containsKey(glyf_table)) {
-      _parseIndexes();
-      _parseGlyphs();
-    }
+        tableOffsets[name] = offset;
+        tableSize[name] = size;
+      }
 
-    if (tableOffsets.containsKey(cblc_table) &&
-        tableOffsets.containsKey(cbdt_table)) {
-      _parseBitmaps();
-    }
+      assert(tableOffsets.containsKey(head_table),
+          'Unable to find the `head` table. This file is not a supported TTF font');
+      assert(tableOffsets.containsKey(name_table),
+          'Unable to find the `name` table. This file is not a supported TTF font');
+      assert(tableOffsets.containsKey(hmtx_table),
+          'Unable to find the `hmtx` table. This file is not a supported TTF font');
+      assert(tableOffsets.containsKey(hhea_table),
+          'Unable to find the `hhea` table. This file is not a supported TTF font');
+      assert(tableOffsets.containsKey(cmap_table),
+          'Unable to find the `cmap` table. This file is not a supported TTF font');
+      assert(tableOffsets.containsKey(maxp_table),
+          'Unable to find the `maxp` table. This file is not a supported TTF font');
 
-    if (tableOffsets.containsKey(gsub_table)) {
-      _parseGsub();
-    }
-    if (tableOffsets.containsKey(gpos_table)) {
-      _parseGpos();
-    }
+      _parseCMap();
+      if (tableOffsets.containsKey(loca_table) &&
+          tableOffsets.containsKey(glyf_table)) {
+        _parseIndexes();
+        _parseGlyphs();
+      }
 
-    if (tableOffsets.containsKey(gdef_table)) {
-      _parseGdef();
+      if (tableOffsets.containsKey(cblc_table) &&
+          tableOffsets.containsKey(cbdt_table)) {
+        _parseBitmaps();
+      }
+
+      if (tableOffsets.containsKey(gsub_table)) {
+        _parseGsub();
+      }
+      if (tableOffsets.containsKey(gpos_table)) {
+        _parseGpos();
+      }
+
+      if (tableOffsets.containsKey(gdef_table)) {
+        _parseGdef();
+      }
+    } catch (e, stack) {
+      print('Error parsing font $fontName: $e');
+      print(stack);
+      rethrow;
     }
   }
 
@@ -248,8 +261,9 @@ class TtfParser {
 
       if (platformID == 1 && nameID == fontNameID.index) {
         try {
-          _fontName = utf8.decode(bytes.buffer
-              .asUint8List(basePosition + stringOffset + offset, length));
+          _fontName = utf8.decode(bytes.buffer.asUint8List(
+              bytes.offsetInBytes + basePosition + stringOffset + offset,
+              length));
         } catch (a) {
           print('Error: $platformID $nameID $a');
         }
@@ -257,8 +271,9 @@ class TtfParser {
 
       if (platformID == 3 && nameID == fontNameID.index) {
         try {
-          return _decodeUtf16(bytes.buffer
-              .asUint8List(basePosition + stringOffset + offset, length));
+          return _decodeUtf16(bytes.buffer.asUint8List(
+              bytes.offsetInBytes + basePosition + stringOffset + offset,
+              length));
         } catch (a) {
           print('Error: $platformID $nameID $a');
         }
@@ -268,31 +283,36 @@ class TtfParser {
   }
 
   void _parseCMap() {
-    final basePosition = tableOffsets[cmap_table]!;
-    final numSubTables = bytes.getUint16(basePosition + 2);
-    for (var i = 0; i < numSubTables; i++) {
-      final offset = bytes.getUint32(basePosition + i * 8 + 8);
-      final format = bytes.getUint16(basePosition + offset);
+    try {
+      final basePosition = tableOffsets[cmap_table]!;
+      final numSubTables = bytes.getUint16(basePosition + 2);
+      for (var i = 0; i < numSubTables; i++) {
+        final offset = bytes.getUint32(basePosition + i * 8 + 8);
+        final format = bytes.getUint16(basePosition + offset);
 
-      switch (format) {
-        case 0:
-          _parseCMapFormat0(basePosition + offset + 2);
-          break;
+        switch (format) {
+          case 0:
+            _parseCMapFormat0(basePosition + offset + 2);
+            break;
 
-        case 4:
-          _parseCMapFormat4(basePosition + offset + 2);
-          break;
-        case 6:
-          _parseCMapFormat6(basePosition + offset + 2);
-          break;
+          case 4:
+            _parseCMapFormat4(basePosition + offset + 2);
+            break;
+          case 6:
+            _parseCMapFormat6(basePosition + offset + 2);
+            break;
 
-        case 12:
-          _parseCMapFormat12(basePosition + offset + 2);
-          break;
+          case 12:
+            _parseCMapFormat12(basePosition + offset + 2);
+            break;
+        }
       }
+    } catch (e, stack) {
+      print('Error parsing CMAP table: $e');
+      print(stack);
+      rethrow;
     }
   }
-
   void _parseCMapFormat0(int basePosition) {
     assert(bytes.getUint16(basePosition) == 262);
     for (var i = 0; i < 256; i++) {
@@ -578,7 +598,7 @@ class TtfParser {
 
   String _decodeUtf16(Uint8List bytes) {
     final charCodes = <int>[];
-    for (var i = 0; i < bytes.length; i += 2) {
+    for (var i = 0; i < bytes.length - 1; i += 2) {
       charCodes.add((bytes[i] << 8) | bytes[i + 1]);
     }
     return String.fromCharCodes(charCodes);

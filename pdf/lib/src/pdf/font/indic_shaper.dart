@@ -8,41 +8,39 @@ import 'ttf_parser.dart';
 /* Shaper Setup */
 
 List<int> initialReorder(List<int> glyphIndexes, String lang) {
-  try {
-    if (lang == 'telugu') {
-      if (ListEquality()
-          .equals(glyphIndexes, [43, 73, 49, 38, 73, 48, 68, 23])) {
-        return [43, 73, 49, 38, 68, 73, 48, 23];
-      }
+  if (lang == 'telugu') {
+    if (ListEquality()
+        .equals(glyphIndexes, [43, 73, 49, 38, 73, 48, 68, 23])) {
+      return [43, 73, 49, 38, 68, 73, 48, 23];
     }
-    for (var i = 0; i < glyphIndexes.length; i++) {
-      final glyphIndex = glyphIndexes[i];
-      final nextGlyphIndex =
-          i + 1 >= glyphIndexes.length ? null : glyphIndexes[i + 1];
-      if (i != 0) {
-        if (lang == 'tamil') {
-          if (glyphIndex == 47 || glyphIndex == 46 || glyphIndex == 48) {
-            // ெ ை ே
-            glyphIndexes[i] = glyphIndexes[i - 1];
-            glyphIndexes[i - 1] = glyphIndex;
-          }
-        } else if (lang == 'hindi') {
-          if (glyphIndex == 67) {
-            glyphIndexes[i] = glyphIndexes[i - 1];
-            glyphIndexes[i - 1] = glyphIndex;
-          }
-        } else if (lang == 'telugu') {
-          if (glyphIndex == 73 && nextGlyphIndex != null) {
-            glyphIndexes[i] = glyphIndexes[i + 2];
-            glyphIndexes[i + 1] = glyphIndex;
-            glyphIndexes[i + 2] = nextGlyphIndex;
-            i = i + 2;
-          }
+  }
+  for (var i = 0; i < glyphIndexes.length; i++) {
+    final glyphIndex = glyphIndexes[i];
+    final nextGlyphIndex =
+        i + 1 >= glyphIndexes.length ? null : glyphIndexes[i + 1];
+    if (i != 0) {
+      if (lang == 'tamil') {
+        if (glyphIndex == 47 || glyphIndex == 46 || glyphIndex == 48) {
+          // ெ ை ே
+          glyphIndexes[i] = glyphIndexes[i - 1];
+          glyphIndexes[i - 1] = glyphIndex;
+        }
+      } else if (lang == 'hindi') {
+        if (glyphIndex == 67) {
+          glyphIndexes[i] = glyphIndexes[i - 1];
+          glyphIndexes[i - 1] = glyphIndex;
+        }
+      } else if (lang == 'telugu') {
+        if (glyphIndex == 73 &&
+            nextGlyphIndex != null &&
+            i + 2 < glyphIndexes.length) {
+          glyphIndexes[i] = glyphIndexes[i + 2];
+          glyphIndexes[i + 1] = glyphIndex;
+          glyphIndexes[i + 2] = nextGlyphIndex;
+          i = i + 2;
         }
       }
     }
-  } catch (e) {
-    print(e);
   }
   return glyphIndexes;
 }
@@ -50,7 +48,7 @@ List<int> initialReorder(List<int> glyphIndexes, String lang) {
 List<int> finalReorder(List<int> glyphIndexes, String lang) {
   for (var i = 0; i < glyphIndexes.length; i++) {
     final glyphIndex = glyphIndexes[i];
-    if (lang == 'tamil') {
+    if (lang == 'tamil' && i > 0) {
       if (glyphIndex == 49) {
         glyphIndexes.replaceRange(i - 1, i + 1, [46, glyphIndexes[i - 1], 41]);
       } else if (glyphIndex == 50) {
@@ -64,18 +62,48 @@ List<int> finalReorder(List<int> glyphIndexes, String lang) {
 }
 
 String getLang(String fontName) {
-  if (fontName.toLowerCase().contains('tamil')) {
+  final name = fontName.toLowerCase();
+  if (name.contains('tamil')) {
     return 'tamil';
-  } else if (fontName.toLowerCase().contains('devanagari')) {
+  } else if (name.contains('devanagari') ||
+      name.contains('hindi') ||
+      name.contains('marathi') ||
+      name.contains('nepali') ||
+      name.contains('sanskrit')) {
     return 'hindi';
-  } else if (fontName.toLowerCase().contains('telugu')) {
+  } else if (name.contains('telugu')) {
     return 'telugu';
+  } else if (name.contains('bengali') || name.contains('assamese')) {
+    return 'bengali';
+  } else if (name.contains('gujarati')) {
+    return 'gujarati';
+  } else if (name.contains('kannada')) {
+    return 'kannada';
+  } else if (name.contains('malayalam')) {
+    return 'malayalam';
+  } else if (name.contains('oriya') || name.contains('odia')) {
+    return 'oriya';
+  } else if (name.contains('gurmukhi') || name.contains('punjabi')) {
+    return 'gurmukhi';
+  } else if (name.contains('sinhala')) {
+    return 'sinhala';
   }
   return '';
 }
 
 bool isIndicShaperSupported(String lang) {
-  return ['tamil', 'hindi', 'telugu'].contains(lang);
+  return [
+    'tamil',
+    'hindi',
+    'telugu',
+    'bengali',
+    'gujarati',
+    'kannada',
+    'malayalam',
+    'oriya',
+    'gurmukhi',
+    'sinhala',
+  ].contains(lang);
 }
 
 var variationFeatures = ['rvrn'];
