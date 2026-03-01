@@ -100,9 +100,7 @@ bool PrintJob::printPdf(const std::string& name,
     ZeroMemory(dm, sizeof(DEVMODE));
     dm->dmSize = (WORD)dmSize;
     dm->dmDriverExtra = (WORD)dmExtra;
-    dm->dmFields =
-        DM_ORIENTATION | DM_PAPERSIZE | DM_PAPERLENGTH | DM_PAPERWIDTH;
-    dm->dmPaperSize = 0;
+    dm->dmFields = DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
     // Always use portrait orientation in DEVMODE — the PDF content itself
     // already has the correct orientation, so we don't need the driver
     // to rotate. Using DMORIENT_LANDSCAPE with custom paper sizes
@@ -281,14 +279,14 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
     if (isRollPaper) {
       auto pDm = static_cast<DEVMODE*>(GlobalLock(hDevMode));
       if (pDm) {
-        pDm->dmFields |= DM_PAPERLENGTH | DM_PAPERWIDTH | DM_PAPERSIZE;
-        pDm->dmPaperSize = 0;
+        pDm->dmFields |= DM_PAPERLENGTH | DM_PAPERWIDTH;
+        pDm->dmFields &= ~DM_PAPERSIZE;
         pDm->dmPaperWidth =
             static_cast<short>(round(pdfWidth * 254.0 / pdfDpi));
         pDm->dmPaperLength =
             static_cast<short>(round(pdfHeight * 254.0 / pdfDpi));
-        GlobalUnlock(hDevMode);
         ResetDC(hDC, pDm);
+        GlobalUnlock(hDevMode);
       }
       marginLeft = GetDeviceCaps(hDC, PHYSICALOFFSETX);
       marginTop = GetDeviceCaps(hDC, PHYSICALOFFSETY);
