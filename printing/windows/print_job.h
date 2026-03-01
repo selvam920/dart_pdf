@@ -63,6 +63,7 @@ class PrintJob {
   HGLOBAL hDevNames = nullptr;
   HDC hDC = nullptr;
   std::string documentName;
+  bool isRollPaper = false;
 
  public:
   PrintJob(Printing* printing, int index);

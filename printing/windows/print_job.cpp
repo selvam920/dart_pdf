@@ -23,9 +23,11 @@
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <tchar.h>
+#include <cmath>
 #include <codecvt>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <numeric>
 
 namespace nfet {
@@ -80,6 +82,7 @@ bool PrintJob::printPdf(const std::string& name,
                         double height,
                         bool usePrinterSettings) {
   documentName = name;
+  isRollPaper = std::isinf(height) || std::isinf(width);
 
   std::size_t dmSize = sizeof(DEVMODE);
   std::size_t dmExtra = 0;
@@ -100,12 +103,16 @@ bool PrintJob::printPdf(const std::string& name,
     dm->dmFields =
         DM_ORIENTATION | DM_PAPERSIZE | DM_PAPERLENGTH | DM_PAPERWIDTH;
     dm->dmPaperSize = 0;
-    if (width > height) {
-      dm->dmOrientation = DMORIENT_LANDSCAPE;
-      dm->dmPaperWidth = static_cast<short>(round(height * 254 / pdfDpi));
-      dm->dmPaperLength = static_cast<short>(round(width * 254 / pdfDpi));
+    // Always use portrait orientation in DEVMODE — the PDF content itself
+    // already has the correct orientation, so we don't need the driver
+    // to rotate. Using DMORIENT_LANDSCAPE with custom paper sizes
+    // causes issues on many Windows printer drivers.
+    dm->dmOrientation = DMORIENT_PORTRAIT;
+    if (isRollPaper) {
+      // Roll/continuous paper: use width from PdfPageFormat, height set per-page
+      dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
+      dm->dmPaperLength = dm->dmPaperWidth;  // Initial square size
     } else {
-      dm->dmOrientation = DMORIENT_PORTRAIT;
       dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
       dm->dmPaperLength = static_cast<short>(round(height * 254 / pdfDpi));
     }
@@ -170,8 +177,16 @@ bool PrintJob::printPdf(const std::string& name,
   auto marginRight = pageWidth - printableWidth - marginLeft;
   auto marginBottom = pageHeight - printableHeight - marginTop;
 
-  printing->onLayout(this, pageWidth, pageHeight, marginLeft, marginTop,
-                     marginRight, marginBottom);
+  if (isRollPaper) {
+    // For roll paper, pass infinity height back to Dart so the PDF
+    // page auto-sizes to fit content
+    printing->onLayout(this, pageWidth,
+                       std::numeric_limits<double>::infinity(), marginLeft,
+                       marginTop, marginRight, marginBottom);
+  } else {
+    printing->onLayout(this, pageWidth, pageHeight, marginLeft, marginTop,
+                       marginRight, marginBottom);
+  }
   return true;
 }
 
@@ -253,16 +268,35 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
   auto marginTop = GetDeviceCaps(hDC, PHYSICALOFFSETY);
 
   for (auto pageNum = 0; pageNum < pages; pageNum++) {
-    StartPage(hDC);
-
     auto page = FPDF_LoadPage(doc, pageNum);
     if (!page) {
-      EndPage(hDC);
       continue;
     }
 
     auto pdfWidth = FPDF_GetPageWidth(page);
     auto pdfHeight = FPDF_GetPageHeight(page);
+
+    // For roll/continuous paper, update the printer DC page size
+    // to match the actual PDF page dimensions before printing
+    if (isRollPaper) {
+      auto pDm = static_cast<DEVMODE*>(GlobalLock(hDevMode));
+      if (pDm) {
+        pDm->dmFields |= DM_PAPERLENGTH | DM_PAPERWIDTH | DM_PAPERSIZE;
+        pDm->dmPaperSize = 0;
+        pDm->dmPaperWidth =
+            static_cast<short>(round(pdfWidth * 254.0 / pdfDpi));
+        pDm->dmPaperLength =
+            static_cast<short>(round(pdfHeight * 254.0 / pdfDpi));
+        GlobalUnlock(hDevMode);
+        ResetDC(hDC, pDm);
+      }
+      marginLeft = GetDeviceCaps(hDC, PHYSICALOFFSETX);
+      marginTop = GetDeviceCaps(hDC, PHYSICALOFFSETY);
+      dpiX = static_cast<double>(GetDeviceCaps(hDC, LOGPIXELSX)) / pdfDpi;
+      dpiY = static_cast<double>(GetDeviceCaps(hDC, LOGPIXELSY)) / pdfDpi;
+    }
+
+    StartPage(hDC);
 
     int bWidth = static_cast<int>(pdfWidth * dpiX);
     int bHeight = static_cast<int>(pdfHeight * dpiY);

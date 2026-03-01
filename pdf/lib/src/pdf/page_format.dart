@@ -49,6 +49,8 @@ class PdfPageFormat {
       PdfPageFormat(57 * mm, double.infinity, marginAll: 5 * mm);
   static const PdfPageFormat roll80 =
       PdfPageFormat(80 * mm, double.infinity, marginAll: 5 * mm);
+  static const PdfPageFormat roll104 =
+      PdfPageFormat(4 * inch, double.infinity, marginAll: 5 * mm);
 
   static const PdfPageFormat undefined =
       PdfPageFormat(double.infinity, double.infinity);
