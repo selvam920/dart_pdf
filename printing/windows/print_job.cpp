@@ -288,16 +288,43 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
         ResetDC(hDC, pDm);
         GlobalUnlock(hDevMode);
       }
-      marginLeft = GetDeviceCaps(hDC, PHYSICALOFFSETX);
-      marginTop = GetDeviceCaps(hDC, PHYSICALOFFSETY);
+      // Do NOT re-query PHYSICALOFFSETX/PHYSICALOFFSETY after ResetDC.
+      // The PDF content was laid out based on the margins reported via
+      // onLayout (from the initial DC). If ResetDC changes the physical
+      // offset, using the new values here would create a mismatch —
+      // content positioned near the left edge (based on the original
+      // margins) would be shifted into the unprintable area and clipped.
+      // Keep the initial marginLeft/marginTop for consistent rendering.
       dpiX = static_cast<double>(GetDeviceCaps(hDC, LOGPIXELSX)) / pdfDpi;
       dpiY = static_cast<double>(GetDeviceCaps(hDC, LOGPIXELSY)) / pdfDpi;
     }
 
     StartPage(hDC);
 
+    // Get the printer's actual printable area (in device pixels)
+    auto printableWidthPx = GetDeviceCaps(hDC, HORZRES);
+    auto printableHeightPx = GetDeviceCaps(hDC, VERTRES);
+
     int bWidth = static_cast<int>(pdfWidth * dpiX);
     int bHeight = static_cast<int>(pdfHeight * dpiY);
+
+    // Scale down to fit if the PDF page is larger than the printer's
+    // printable area (e.g. 80mm PDF on a 72mm thermal printer).
+    // Only scale down, never scale up.
+    double scale = 1.0;
+    if (bWidth > 0 && bHeight > 0) {
+      double scaleX = (bWidth > printableWidthPx)
+                          ? static_cast<double>(printableWidthPx) / bWidth
+                          : 1.0;
+      double scaleY = (bHeight > printableHeightPx)
+                          ? static_cast<double>(printableHeightPx) / bHeight
+                          : 1.0;
+      scale = (std::min)(scaleX, scaleY);
+      if (scale < 1.0) {
+        bWidth = static_cast<int>(bWidth * scale);
+        bHeight = static_cast<int>(bHeight * scale);
+      }
+    }
 
     FPDF_RenderPage(hDC, page, -marginLeft, -marginTop, bWidth, bHeight, 0,
                     FPDF_ANNOT | FPDF_PRINTING);
