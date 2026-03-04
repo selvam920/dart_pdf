@@ -73,6 +73,42 @@ std::wstring fromUtf8(std::string str) {
   return wstr;
 }
 
+// Match known PdfPageFormat dimensions (in PDF points) to a Windows
+// DMPAPER_* constant.  Returns 0 when no standard size matches.
+static short matchStandardPaperSize(double widthPt, double heightPt) {
+  // Portrait dimensions (short × long) in tenths of a millimetre.
+  auto shortSide =
+      static_cast<short>(round(std::min(widthPt, heightPt) * 254.0 / 72.0));
+  auto longSide =
+      static_cast<short>(round(std::max(widthPt, heightPt) * 254.0 / 72.0));
+
+  // Allow ±2 mm tolerance for floating-point rounding.
+  auto match = [](short a, short b) -> bool {
+    return std::abs(a - b) <= 20;
+  };
+
+  // A3: 297 × 420 mm
+  if (match(shortSide, 2970) && match(longSide, 4200))
+    return DMPAPER_A3;
+  // A4: 210 × 297 mm
+  if (match(shortSide, 2100) && match(longSide, 2970))
+    return DMPAPER_A4;
+  // A5: 148 × 210 mm
+  if (match(shortSide, 1480) && match(longSide, 2100))
+    return DMPAPER_A5;
+  // A6: 105 × 148 mm
+  if (match(shortSide, 1050) && match(longSide, 1480))
+    return DMPAPER_A6;
+  // US Letter: 215.9 × 279.4 mm
+  if (match(shortSide, 2159) && match(longSide, 2794))
+    return DMPAPER_LETTER;
+  // US Legal: 215.9 × 355.6 mm
+  if (match(shortSide, 2159) && match(longSide, 3556))
+    return DMPAPER_LEGAL;
+
+  return 0;
+}
+
 PrintJob::PrintJob(Printing* printing, int index)
     : printing{printing}, index{index} {}
 
@@ -95,24 +131,84 @@ bool PrintJob::printPdf(const std::string& name,
   auto dm = static_cast<DEVMODE*>(GlobalAlloc(0, dmSize + dmExtra));
 
   if (usePrinterSettings) {
-    dm = nullptr;  // to use default driver config
+    // Use the printer's default configuration (paper size, margins, etc.)
+    // without overriding anything — honour whatever the driver reports.
+    bool gotDefaults = false;
+    if (!printer.empty()) {
+      HANDLE hPrinter = nullptr;
+      auto wPrinter = fromUtf8(printer);
+      if (OpenPrinter(const_cast<LPWSTR>(wPrinter.c_str()), &hPrinter,
+                      nullptr)) {
+        LONG needed = DocumentProperties(
+            nullptr, hPrinter, const_cast<LPWSTR>(wPrinter.c_str()), nullptr,
+            nullptr, 0);
+        if (needed > 0) {
+          auto defaultDm = static_cast<DEVMODE*>(GlobalAlloc(0, needed));
+          if (defaultDm &&
+              DocumentProperties(nullptr, hPrinter,
+                                 const_cast<LPWSTR>(wPrinter.c_str()),
+                                 defaultDm, nullptr,
+                                 DM_OUT_BUFFER) == IDOK) {
+            GlobalFree(dm);
+            dm = defaultDm;
+            gotDefaults = true;
+          } else {
+            GlobalFree(defaultDm);
+          }
+        }
+        ClosePrinter(hPrinter);
+      }
+    }
+    if (isRollPaper) {
+      // Roll paper always needs explicit width; the height is set per-page
+      // in writeJob via ResetDC.
+      if (!gotDefaults) {
+        ZeroMemory(dm, sizeof(DEVMODE));
+        dm->dmSize = (WORD)dmSize;
+        dm->dmDriverExtra = (WORD)dmExtra;
+      }
+      dm->dmFields |= DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
+      dm->dmFields &= ~DM_PAPERSIZE;
+      dm->dmOrientation = DMORIENT_PORTRAIT;
+      dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
+      dm->dmPaperLength = dm->dmPaperWidth;  // Initial square size
+    } else if (!gotDefaults) {
+      // No printer specified or couldn't retrieve defaults — pass nullptr
+      // so CreateDC / PrintDlg uses the driver's built-in defaults.
+      GlobalFree(dm);
+      dm = nullptr;
+    }
   } else {
     ZeroMemory(dm, sizeof(DEVMODE));
     dm->dmSize = (WORD)dmSize;
     dm->dmDriverExtra = (WORD)dmExtra;
-    dm->dmFields = DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
-    // Always use portrait orientation in DEVMODE — the PDF content itself
-    // already has the correct orientation, so we don't need the driver
-    // to rotate. Using DMORIENT_LANDSCAPE with custom paper sizes
-    // causes issues on many Windows printer drivers.
-    dm->dmOrientation = DMORIENT_PORTRAIT;
     if (isRollPaper) {
       // Roll/continuous paper: use width from PdfPageFormat, height set per-page
+      dm->dmFields = DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
+      dm->dmOrientation = DMORIENT_PORTRAIT;
       dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
       dm->dmPaperLength = dm->dmPaperWidth;  // Initial square size
     } else {
-      dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
-      dm->dmPaperLength = static_cast<short>(round(height * 254 / pdfDpi));
+      auto paperSize = matchStandardPaperSize(width, height);
+      if (paperSize > 0) {
+        // Use the named paper size — drivers handle DM_PAPERSIZE with
+        // DM_ORIENTATION far more reliably than custom dimensions.
+        dm->dmFields = DM_ORIENTATION | DM_PAPERSIZE;
+        dm->dmPaperSize = paperSize;
+        dm->dmOrientation =
+            (width > height) ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+      } else {
+        // Custom paper: pass explicit dimensions in portrait form.
+        dm->dmFields = DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
+        auto shortSide = static_cast<short>(
+            round(std::min(width, height) * 254 / pdfDpi));
+        auto longSide = static_cast<short>(
+            round(std::max(width, height) * 254 / pdfDpi));
+        dm->dmPaperWidth = shortSide;
+        dm->dmPaperLength = longSide;
+        dm->dmOrientation =
+            (width > height) ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+      }
     }
   }
 
