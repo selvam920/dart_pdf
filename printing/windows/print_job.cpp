@@ -78,9 +78,9 @@ std::wstring fromUtf8(std::string str) {
 static short matchStandardPaperSize(double widthPt, double heightPt) {
   // Portrait dimensions (short × long) in tenths of a millimetre.
   auto shortSide =
-      static_cast<short>(round(std::min(widthPt, heightPt) * 254.0 / 72.0));
+      static_cast<short>(round((std::min)(widthPt, heightPt) * 254.0 / 72.0));
   auto longSide =
-      static_cast<short>(round(std::max(widthPt, heightPt) * 254.0 / 72.0));
+      static_cast<short>(round((std::max)(widthPt, heightPt) * 254.0 / 72.0));
 
   // Allow ±2 mm tolerance for floating-point rounding.
   auto match = [](short a, short b) -> bool {
@@ -201,9 +201,9 @@ bool PrintJob::printPdf(const std::string& name,
         // Custom paper: pass explicit dimensions in portrait form.
         dm->dmFields = DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
         auto shortSide = static_cast<short>(
-            round(std::min(width, height) * 254 / pdfDpi));
+            round((std::min)(width, height) * 254 / pdfDpi));
         auto longSide = static_cast<short>(
-            round(std::max(width, height) * 254 / pdfDpi));
+            round((std::max)(width, height) * 254 / pdfDpi));
         dm->dmPaperWidth = shortSide;
         dm->dmPaperLength = longSide;
         dm->dmOrientation =
