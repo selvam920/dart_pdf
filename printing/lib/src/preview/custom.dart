@@ -18,6 +18,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 
 import '../callback.dart';
@@ -137,6 +138,8 @@ class PdfPreviewCustomState extends State<PdfPreviewCustom>
 
   MouseCursor _mouseCursor = MouseCursor.defer;
 
+  final _focusNode = FocusNode();
+
   static const _errorMessage = 'Unable to display the document';
 
   @override
@@ -144,6 +147,7 @@ class PdfPreviewCustomState extends State<PdfPreviewCustom>
 
   @override
   void dispose() {
+    _focusNode.dispose();
     transformationController.dispose();
     previewUpdate?.cancel();
     super.dispose();
@@ -328,6 +332,126 @@ class PdfPreviewCustomState extends State<PdfPreviewCustom>
     }
   }
 
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    const scrollDelta = 100.0;
+    final key = event.logicalKey;
+
+    if (preview != null) {
+      // Zoom mode: Enter/Select/Escape exits zoom
+      if (key == LogicalKeyboardKey.escape ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key == LogicalKeyboardKey.select) {
+        setState(() {
+          preview = null;
+          _updateCursor(MouseCursor.defer);
+        });
+        _zoomChanged();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // Normal mode: arrow keys scroll, Enter/Select zooms into current page
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowLeft) {
+      _scrollBy(-scrollDelta);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowRight) {
+      _scrollBy(scrollDelta);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageUp) {
+      _scrollByPage(-1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageDown) {
+      _scrollByPage(1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.home) {
+      _scrollTo(0);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.end) {
+      if (scrollController.hasClients) {
+        _scrollTo(scrollController.position.maxScrollExtent);
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.select) {
+      if (pages.isNotEmpty) {
+        setState(() {
+          updatePosition = scrollController.hasClients
+              ? scrollController.position.pixels
+              : null;
+          preview = _currentPageIndex;
+          transformationController.value.setIdentity();
+          _updateCursor(SystemMouseCursors.grab);
+        });
+        _zoomChanged();
+      }
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  int get _currentPageIndex {
+    if (!scrollController.hasClients || pages.isEmpty) {
+      return 0;
+    }
+    final offset = scrollController.position.pixels;
+    final viewportHeight = scrollController.position.viewportDimension;
+    final totalExtent =
+        scrollController.position.maxScrollExtent + viewportHeight;
+    final pageHeight = totalExtent / pages.length;
+    if (pageHeight <= 0) {
+      return 0;
+    }
+    return ((offset + viewportHeight / 2) / pageHeight)
+        .floor()
+        .clamp(0, pages.length - 1);
+  }
+
+  void _scrollBy(double delta) {
+    if (!scrollController.hasClients) {
+      return;
+    }
+    final position = scrollController.position;
+    _scrollTo(
+      (position.pixels + delta).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
+  }
+
+  void _scrollByPage(int direction) {
+    if (!scrollController.hasClients) {
+      return;
+    }
+    final pageSize =
+        scrollController.position.viewportDimension * 0.8;
+    _scrollBy(direction * pageSize);
+  }
+
+  void _scrollTo(double offset) {
+    scrollController.animateTo(
+      offset,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget page;
@@ -350,18 +474,23 @@ class PdfPreviewCustomState extends State<PdfPreviewCustom>
       }
     }
 
-    return Container(
-      decoration: widget.scrollViewDecoration ??
-          BoxDecoration(
-            gradient: LinearGradient(
-              colors: <Color>[Colors.grey.shade400, Colors.grey.shade200],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+    return Focus(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Container(
+        decoration: widget.scrollViewDecoration ??
+            BoxDecoration(
+              gradient: LinearGradient(
+                colors: <Color>[Colors.grey.shade400, Colors.grey.shade200],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
             ),
-          ),
-      width: double.infinity,
-      alignment: Alignment.center,
-      child: page,
+        width: double.infinity,
+        alignment: Alignment.center,
+        child: page,
+      ),
     );
   }
 }

@@ -1,8 +1,7 @@
 import 'dart:io';
 
-import 'package:pdf/src/pdf/font/indic_shaper.dart';
 import 'package:pdf/src/pdf/font/glyph_iterator.dart';
-import 'package:pdf/src/pdf/font/gsub_parser.dart';
+import 'package:pdf/src/pdf/font/indic_shaper.dart';
 import 'package:pdf/src/pdf/font/ot_processor.dart';
 import 'package:pdf/src/pdf/font/ttf_parser.dart';
 
@@ -104,9 +103,13 @@ void main() {
 }
 
 bool _eq(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
+  if (a.length != b.length) {
+    return false;
+  }
   for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
+    if (a[i] != b[i]) {
+      return false;
+    }
   }
   return true;
 }

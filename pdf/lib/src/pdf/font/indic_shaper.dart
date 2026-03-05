@@ -9,27 +9,41 @@ import 'ttf_parser.dart';
 /// but are stored after it in Unicode. These must be reordered.
 bool _isLeftMatra(int codepoint) {
   // Devanagari
-  if (codepoint == 0x093F) return true; // ि
+  if (codepoint == 0x093F) {
+    return true; // ि
+  }
   // Bengali
   if (codepoint == 0x09BF || codepoint == 0x09C7 || codepoint == 0x09C8) {
     return true; // ি ে ৈ
   }
   // Gurmukhi
-  if (codepoint == 0x0A3F) return true; // ਿ
+  if (codepoint == 0x0A3F) {
+    return true; // ਿ
+  }
   // Gujarati
-  if (codepoint == 0x0ABF) return true; // િ
+  if (codepoint == 0x0ABF) {
+    return true; // િ
+  }
   // Oriya
   if (codepoint == 0x0B3F || codepoint == 0x0B47 || codepoint == 0x0B48) {
     return true; // ି େ ୈ
   }
   // Tamil
-  if (codepoint >= 0x0BC6 && codepoint <= 0x0BC8) return true; // ெ ே ை
+  if (codepoint >= 0x0BC6 && codepoint <= 0x0BC8) {
+    return true; // ெ ே ை
+  }
   // Telugu
-  if (codepoint >= 0x0C46 && codepoint <= 0x0C48) return true; // ె  ే  ై
+  if (codepoint >= 0x0C46 && codepoint <= 0x0C48) {
+    return true; // ె  ే  ై
+  }
   // Kannada
-  if (codepoint >= 0x0CC6 && codepoint <= 0x0CC8) return true; // ೆ ೇ ೈ
+  if (codepoint >= 0x0CC6 && codepoint <= 0x0CC8) {
+    return true; // ೆ ೇ ೈ
+  }
   // Malayalam
-  if (codepoint >= 0x0D46 && codepoint <= 0x0D48) return true; // െ േ ൈ
+  if (codepoint >= 0x0D46 && codepoint <= 0x0D48) {
+    return true; // െ േ ൈ
+  }
   // Sinhala
   if (codepoint == 0x0DD9 || codepoint == 0x0DDA || codepoint == 0x0DDC) {
     return true; // ෙ ේ ො
@@ -41,35 +55,67 @@ bool _isLeftMatra(int codepoint) {
 /// Returns [leftPart, rightPart] codepoints, or null if not a compound vowel.
 List<int>? _decomposeCompoundVowel(int codepoint) {
   // Devanagari
-  if (codepoint == 0x094B) return [0x093F, 0x0947]; // ो -> ि + े (not standard)
+  if (codepoint == 0x094B) {
+    return [0x093F, 0x0947]; // ो -> ि + े (not standard)
+  }
   // Actually Devanagari ो doesn't decompose in shaping
 
   // Bengali
-  if (codepoint == 0x09CB) return [0x09C7, 0x09BE]; // ো -> ে + া
-  if (codepoint == 0x09CC) return [0x09C7, 0x09D7]; // ৌ -> ে + ৗ
+  if (codepoint == 0x09CB) {
+    return [0x09C7, 0x09BE]; // ো -> ে + া
+  }
+  if (codepoint == 0x09CC) {
+    return [0x09C7, 0x09D7]; // ৌ -> ে + ৗ
+  }
 
   // Oriya
-  if (codepoint == 0x0B4B) return [0x0B47, 0x0B3E]; // ୋ -> େ + ା
-  if (codepoint == 0x0B4C) return [0x0B47, 0x0B57]; // ୌ -> େ + ୗ
+  if (codepoint == 0x0B4B) {
+    return [0x0B47, 0x0B3E]; // ୋ -> େ + ା
+  }
+  if (codepoint == 0x0B4C) {
+    return [0x0B47, 0x0B57]; // ୌ -> େ + ୗ
+  }
 
   // Tamil
-  if (codepoint == 0x0BCA) return [0x0BC6, 0x0BBE]; // ொ -> ெ + ா
-  if (codepoint == 0x0BCB) return [0x0BC7, 0x0BBE]; // ோ -> ே + ா
-  if (codepoint == 0x0BCC) return [0x0BC6, 0x0BD7]; // ௌ -> ெ + ௗ
+  if (codepoint == 0x0BCA) {
+    return [0x0BC6, 0x0BBE]; // ொ -> ெ + ா
+  }
+  if (codepoint == 0x0BCB) {
+    return [0x0BC7, 0x0BBE]; // ோ -> ே + ா
+  }
+  if (codepoint == 0x0BCC) {
+    return [0x0BC6, 0x0BD7]; // ௌ -> ெ + ௗ
+  }
 
   // Malayalam
-  if (codepoint == 0x0D4A) return [0x0D46, 0x0D3E]; // ൊ -> െ + ാ
-  if (codepoint == 0x0D4B) return [0x0D47, 0x0D3E]; // ോ -> േ + ാ
-  if (codepoint == 0x0D4C) return [0x0D46, 0x0D57]; // ൌ -> െ + ൗ
+  if (codepoint == 0x0D4A) {
+    return [0x0D46, 0x0D3E]; // ൊ -> െ + ാ
+  }
+  if (codepoint == 0x0D4B) {
+    return [0x0D47, 0x0D3E]; // ോ -> േ + ാ
+  }
+  if (codepoint == 0x0D4C) {
+    return [0x0D46, 0x0D57]; // ൌ -> െ + ൗ
+  }
 
   // Sinhala
-  if (codepoint == 0x0DDC) return [0x0DD9, 0x0DCF]; // ො -> ෙ + ා
-  if (codepoint == 0x0DDD) return [0x0DD9, 0x0DDF]; // ෝ -> ෙ + ෟ (not standard)
-  if (codepoint == 0x0DDE) return [0x0DD9, 0x0DDE]; // skip
+  if (codepoint == 0x0DDC) {
+    return [0x0DD9, 0x0DCF]; // ො -> ෙ + ා
+  }
+  if (codepoint == 0x0DDD) {
+    return [0x0DD9, 0x0DDF]; // ෝ -> ෙ + ෟ (not standard)
+  }
+  if (codepoint == 0x0DDE) {
+    return [0x0DD9, 0x0DDE]; // skip
+  }
 
   // Kannada
-  if (codepoint == 0x0CCA) return [0x0CC6, 0x0CC2]; // ೊ -> ೆ + ೂ
-  if (codepoint == 0x0CCB) return [0x0CC6, 0x0CC2]; // ೋ -> ೆ + ೂ (+ 0x0CD5)
+  if (codepoint == 0x0CCA) {
+    return [0x0CC6, 0x0CC2]; // ೊ -> ೆ + ೂ
+  }
+  if (codepoint == 0x0CCB) {
+    return [0x0CC6, 0x0CC2]; // ೋ -> ೆ + ೂ (+ 0x0CD5)
+  }
 
   return null;
 }
