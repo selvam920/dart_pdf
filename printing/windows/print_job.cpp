@@ -172,7 +172,30 @@ bool PrintJob::printPdf(const std::string& name,
       dm->dmOrientation = DMORIENT_PORTRAIT;
       dm->dmPaperWidth = static_cast<short>(round(width * 254 / pdfDpi));
       dm->dmPaperLength = dm->dmPaperWidth;  // Initial square size
-    } else if (!gotDefaults) {
+    } else if (gotDefaults) {
+      // Keep the printer's driver settings (quality, tray, colour, etc.)
+      // but override the paper size and orientation to match the requested
+      // page format so the correct media is selected.
+      auto paperSize = matchStandardPaperSize(width, height);
+      if (paperSize > 0) {
+        dm->dmFields |= DM_ORIENTATION | DM_PAPERSIZE;
+        dm->dmFields &= ~(DM_PAPERLENGTH | DM_PAPERWIDTH);
+        dm->dmPaperSize = paperSize;
+        dm->dmOrientation =
+            (width > height) ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+      } else {
+        dm->dmFields |= DM_ORIENTATION | DM_PAPERLENGTH | DM_PAPERWIDTH;
+        dm->dmFields &= ~DM_PAPERSIZE;
+        auto shortSide = static_cast<short>(
+            round((std::min)(width, height) * 254 / pdfDpi));
+        auto longSide = static_cast<short>(
+            round((std::max)(width, height) * 254 / pdfDpi));
+        dm->dmPaperWidth = shortSide;
+        dm->dmPaperLength = longSide;
+        dm->dmOrientation =
+            (width > height) ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+      }
+    } else {
       // No printer specified or couldn't retrieve defaults — pass nullptr
       // so CreateDC / PrintDlg uses the driver's built-in defaults.
       GlobalFree(dm);
