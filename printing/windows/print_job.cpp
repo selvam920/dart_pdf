@@ -259,9 +259,9 @@ bool PrintJob::printPdf(const std::string& name,
 
     if (r != 1) {
       printing->onCompleted(this, false, "");
-      DeleteDC(hDC);
-      GlobalFree(hDevNames);
-      ClosePrinter(hDevMode);
+      if (pd.hDC) DeleteDC(pd.hDC);
+      GlobalFree(pd.hDevNames);
+      GlobalFree(pd.hDevMode);
       return true;
     }
 
@@ -377,6 +377,11 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
   auto doc = FPDF_LoadMemDocument64(data.data(), data.size(), nullptr);
   if (!doc) {
     FPDF_DestroyLibrary();
+    EndDoc(hDC);
+    DeleteDC(hDC);
+    GlobalFree(hDevNames);
+    GlobalFree(hDevMode);
+    printing->onCompleted(this, false, "Cannot load PDF document");
     return;
   }
 
@@ -458,7 +463,7 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
 
   DeleteDC(hDC);
   GlobalFree(hDevNames);
-  ClosePrinter(hDevMode);
+  GlobalFree(hDevMode);
 
   printing->onCompleted(this, true, "");
 }
