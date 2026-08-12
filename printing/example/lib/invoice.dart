@@ -43,20 +43,29 @@ const _pageMargin = pw.EdgeInsets.fromLTRB(28, 28, 28, 24);
 ///
 /// [itemCount] sets how many line items to invent, which is what drives the
 /// page count - roughly 30 rows fit on a page, so 7 stays on one page, 45
-/// spills onto a second and 95 runs to a fourth (on A4 or Letter, with or
+/// spills onto a second and 94 runs to a fourth (on A4 or Letter, with or
 /// without the GST summary). However many pages that works out to, the
 /// totals and footer stay pinned to the bottom of the last one, and the
 /// header and page number repeat on every page.
 ///
-/// Pass [showGstSummary] to add an HSN/SAC-wise tax breakup above the
-/// declaration, and charge GST on top of the line items.
+/// Pass [showGstSummary] to add HSN/SAC and GST Rate columns to the items,
+/// CGST/SGST lines above the total, and an HSN-wise tax breakup above the
+/// declaration. [interstate] switches those tax lines to a single IGST at
+/// the full rate. [withCharges] adds a delivery charge and a discount to
+/// demonstrate the adjustment lines.
 Future<Uint8List> generateInvoice(
   PdfPageFormat format, {
   int itemCount = 7,
   bool showGstSummary = false,
+  bool interstate = false,
+  bool withCharges = false,
 }) async {
-  final invoice =
-      _sampleInvoice(itemCount: itemCount, showGstSummary: showGstSummary);
+  final invoice = _sampleInvoice(
+    itemCount: itemCount,
+    showGstSummary: showGstSummary,
+    interstate: interstate,
+    withCharges: withCharges,
+  );
   final pdf = pw.Document();
   final contentWidth = format.width - _pageMargin.left - _pageMargin.right;
 
@@ -71,7 +80,11 @@ Future<Uint8List> generateInvoice(
 
         // See point 3 above: stretches to fill whatever is left of the
         // page the item table finished on.
-        pw.Expanded(child: _boxSides(contentWidth)),
+        pw.Expanded(child: _boxSides(contentWidth, _columnsFor(invoice))),
+
+        // Charges, discounts and tax - flush above the Total, like an
+        // accounting package prints them.
+        if (invoice.adjustmentLines.isNotEmpty) _buildAdjustmentRows(invoice),
 
         _buildTotalsRow(invoice),
         _buildFooter(invoice),
@@ -271,19 +284,45 @@ pw.Widget _invoiceInfoColumn(Invoice invoice) {
 // Items table (spans pages automatically; header row repeats on every page)
 // ---------------------------------------------------------------------------
 
-/// Relative widths of Sl No. / Description / Quantity / Rate / per / Amount.
-/// Shared by the items table, the totals row and the blank filler's column
-/// dividers so all three line up exactly.
-const _columnWeights = [0.6, 4.4, 1.1, 1.0, 0.7, 1.4];
-
 /// Shared by the table's own `verticalInside` and the filler's divider
 /// rectangles in [_boxSides], so both are centered on the same line.
 const _dividerWidth = 0.75;
 
-final Map<int, pw.TableColumnWidth> _itemColumnWidths = {
-  for (var i = 0; i < _columnWeights.length; i++)
-    i: pw.FlexColumnWidth(_columnWeights[i]),
-};
+/// Column geometry for the items area. The items table, the adjustment
+/// rows, the totals row and the blank filler's dividers all have to agree
+/// on this exactly, or their vertical rules stop lining up.
+///
+/// Turning the GST summary on inserts two more columns (HSN/SAC and GST
+/// Rate), which is why this is derived from the invoice rather than being a
+/// single constant.
+class _Columns {
+  const _Columns(this.weights, this.quantity);
+
+  /// Relative width of each column, left to right.
+  final List<double> weights;
+
+  /// Index of the Quantity column, which the totals row also fills in.
+  final int quantity;
+
+  int get count => weights.length;
+
+  /// Description of Goods - also where the adjustment rows and the totals
+  /// row put their label.
+  int get description => 1;
+
+  int get amount => count - 1;
+
+  Map<int, pw.TableColumnWidth> get widths => {
+        for (var i = 0; i < weights.length; i++)
+          i: pw.FlexColumnWidth(weights[i]),
+      };
+}
+
+_Columns _columnsFor(Invoice invoice) => invoice.showGstSummary
+    //         Sl   Desc  HSN  Rate%  Qty  Rate  per  Amount
+    ? const _Columns([0.5, 3.3, 0.9, 0.8, 1.0, 0.9, 0.55, 1.25], 4)
+    //         Sl   Desc  Qty  Rate  per  Amount
+    : const _Columns([0.6, 4.4, 1.1, 1.0, 0.7, 1.4], 2);
 
 pw.Widget _cell(
   String text, {
@@ -297,11 +336,19 @@ pw.Widget _cell(
   );
 }
 
+/// Builds one row of [columns.count] cells, taking whichever ones are given
+/// by index and leaving the rest blank.
+List<pw.Widget> _sparseRow(_Columns columns, Map<int, pw.Widget> cells) {
+  return List<pw.Widget>.generate(columns.count, (i) => cells[i] ?? _cell(''));
+}
+
 pw.Widget _buildItemsTable(Invoice invoice) {
   final headerStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
+  final columns = _columnsFor(invoice);
+  final gst = invoice.showGstSummary;
 
   return pw.Table(
-    columnWidths: _itemColumnWidths,
+    columnWidths: columns.widths,
     border: const pw.TableBorder(
       left: pw.BorderSide(),
       top: pw.BorderSide(),
@@ -328,6 +375,10 @@ pw.Widget _buildItemsTable(Invoice invoice) {
         children: [
           _cell('Sl\nNo.', style: headerStyle, align: pw.Alignment.center),
           _cell('Description of Goods', style: headerStyle),
+          if (gst) ...[
+            _cell('HSN/SAC', style: headerStyle, align: pw.Alignment.center),
+            _cell('GST\nRate', style: headerStyle, align: pw.Alignment.center),
+          ],
           _cell('Quantity', style: headerStyle, align: pw.Alignment.center),
           _cell('Rate', style: headerStyle, align: pw.Alignment.centerRight),
           _cell('per', style: headerStyle, align: pw.Alignment.center),
@@ -338,6 +389,11 @@ pw.Widget _buildItemsTable(Invoice invoice) {
         pw.TableRow(children: [
           _cell('${i + 1}', align: pw.Alignment.center),
           _cell(invoice.items[i].description),
+          if (gst) ...[
+            _cell(invoice.items[i].hsn, align: pw.Alignment.center),
+            _cell('${_fmtQty(invoice.items[i].gstRate)} %',
+                align: pw.Alignment.center),
+          ],
           _cell(_fmtQty(invoice.items[i].quantity), align: pw.Alignment.center),
           _cell(_fmtAmount(invoice.items[i].rate),
               align: pw.Alignment.centerRight),
@@ -345,6 +401,45 @@ pw.Widget _buildItemsTable(Invoice invoice) {
           _cell(_fmtAmount(invoice.items[i].amount),
               align: pw.Alignment.centerRight),
         ]),
+    ],
+  );
+}
+
+/// The charge / discount / tax lines that sit between the blank filler and
+/// the totals row - so they read as the last few entries of the items area,
+/// flush above the Total, exactly where an accounting package puts them.
+///
+/// Only called when [Invoice.adjustmentLines] is non-empty; with none, the
+/// filler runs straight into the totals row as before.
+pw.Widget _buildAdjustmentRows(Invoice invoice) {
+  final lines = invoice.adjustmentLines;
+  final columns = _columnsFor(invoice);
+  final labelStyle = pw.TextStyle(
+      fontSize: 9,
+      fontWeight: pw.FontWeight.bold,
+      fontStyle: pw.FontStyle.italic);
+
+  return pw.Table(
+    columnWidths: columns.widths,
+    border: const pw.TableBorder(
+      left: pw.BorderSide(),
+      right: pw.BorderSide(),
+      verticalInside: pw.BorderSide(width: _dividerWidth),
+      // No top or bottom: the filler above and the totals row below supply
+      // those, so this reads as a continuation of the items area.
+    ),
+    children: [
+      for (final line in lines)
+        pw.TableRow(
+          children: _sparseRow(columns, {
+            columns.description: _cell(line.label,
+                style: labelStyle, align: pw.Alignment.centerRight),
+            columns.amount: _cell(_fmtAmount(line.amount),
+                style:
+                    pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                align: pw.Alignment.centerRight),
+          }),
+        ),
     ],
   );
 }
@@ -362,12 +457,12 @@ pw.Widget _buildItemsTable(Invoice invoice) {
 /// `Stack` only takes on the real (bounded) height once [pw.Expanded]
 /// assigns it - its plain, undecorated first child is what keeps it at
 /// height zero until then.
-pw.Widget _boxSides(double contentWidth) {
-  final totalWeight = _columnWeights.reduce((a, b) => a + b);
+pw.Widget _boxSides(double contentWidth, _Columns columns) {
+  final totalWeight = columns.weights.reduce((a, b) => a + b);
   final dividerXs = <double>[];
   var cumulativeWeight = 0.0;
-  for (var i = 0; i < _columnWeights.length - 1; i++) {
-    cumulativeWeight += _columnWeights[i];
+  for (var i = 0; i < columns.weights.length - 1; i++) {
+    cumulativeWeight += columns.weights[i];
     dividerXs.add(contentWidth * cumulativeWeight / totalWeight);
   }
 
@@ -439,8 +534,10 @@ pw.Widget _buildTotalsRow(Invoice invoice) {
     );
   }
 
+  final columns = _columnsFor(invoice);
+
   return pw.Table(
-    columnWidths: _itemColumnWidths,
+    columnWidths: columns.widths,
     border: const pw.TableBorder(
       left: pw.BorderSide(),
       right: pw.BorderSide(),
@@ -449,16 +546,17 @@ pw.Widget _buildTotalsRow(Invoice invoice) {
       verticalInside: pw.BorderSide(width: _dividerWidth),
     ),
     children: [
-      pw.TableRow(children: [
-        totalCell(''),
-        totalCell('Total'),
-        totalCell('${_fmtQty(invoice.totalQuantity)} pcs',
-            align: pw.Alignment.center),
-        totalCell(''),
-        totalCell(''),
-        totalCell(_fmtAmount(invoice.grandTotal),
-            align: pw.Alignment.centerRight),
-      ]),
+      pw.TableRow(
+        children: _sparseRow(columns, {
+          columns.description: totalCell('Total'),
+          columns.quantity: totalCell('${_fmtQty(invoice.totalQuantity)} pcs',
+              align: pw.Alignment.center),
+          // Everything the buyer owes: the line items, plus any charges or
+          // discounts, plus tax.
+          columns.amount: totalCell(_fmtAmount(invoice.amountChargeable),
+              align: pw.Alignment.centerRight),
+        }),
+      ),
     ],
   );
 }
@@ -547,15 +645,20 @@ pw.Widget _buildGstSummaryTable(Invoice invoice) {
     ]);
   }
 
-  final halfTaxTotal = invoice.taxTotal / 2;
+  // Interstate supplies carry one Integrated Tax column pair; within a
+  // state the same tax is shown split across Central and State pairs.
+  final groups = invoice.interstate
+      ? const ['Integrated Tax']
+      : const ['Central Tax', 'State Tax'];
+  final perGroupTaxTotal = invoice.taxTotal / groups.length;
 
   return pw.Table(
-    columnWidths: const {
-      0: pw.FlexColumnWidth(2.4), // HSN/SAC
-      1: pw.FlexColumnWidth(1.4), // Taxable Value
-      2: pw.FlexColumnWidth(1.7), // Central Tax (Rate + Amount)
-      3: pw.FlexColumnWidth(1.7), // State Tax (Rate + Amount)
-      4: pw.FlexColumnWidth(1.3), // Total Tax Amount
+    columnWidths: {
+      0: const pw.FlexColumnWidth(2.4), // HSN/SAC
+      1: const pw.FlexColumnWidth(1.4), // Taxable Value
+      for (var g = 0; g < groups.length; g++) // one Rate + Amount pair each
+        2 + g: const pw.FlexColumnWidth(1.7),
+      2 + groups.length: const pw.FlexColumnWidth(1.3), // Total Tax Amount
     },
     border: pw.TableBorder(
       left: const pw.BorderSide(width: _dividerWidth),
@@ -573,8 +676,7 @@ pw.Widget _buildGstSummaryTable(Invoice invoice) {
         children: [
           txt('HSN/SAC', labelStyle, pw.Alignment.center),
           txt('Taxable\nValue', labelStyle, pw.Alignment.center),
-          groupHeader('Central Tax'),
-          groupHeader('State Tax'),
+          for (final group in groups) groupHeader(group),
           txt('Total\nTax Amount', labelStyle, pw.Alignment.center),
         ],
       ),
@@ -583,18 +685,17 @@ pw.Widget _buildGstSummaryTable(Invoice invoice) {
           txt(line.hsn, dataStyle, pw.Alignment.centerLeft),
           txt(_fmtAmount(line.taxableValue), dataStyle,
               pw.Alignment.centerRight),
-          pair('${_fmtQty(line.halfRate)}%', _fmtAmount(line.halfTax),
-              dataStyle),
-          pair('${_fmtQty(line.halfRate)}%', _fmtAmount(line.halfTax),
-              dataStyle),
+          for (var g = 0; g < groups.length; g++)
+            pair('${_fmtQty(line.gstRate / groups.length)}%',
+                _fmtAmount(line.totalTax / groups.length), dataStyle),
           txt(_fmtAmount(line.totalTax), dataStyle, pw.Alignment.centerRight),
         ]),
       pw.TableRow(children: [
         txt('Total', boldStyle, pw.Alignment.centerRight),
         txt(_fmtAmount(invoice.grandTotal), boldStyle,
             pw.Alignment.centerRight),
-        pair('', _fmtAmount(halfTaxTotal), boldStyle),
-        pair('', _fmtAmount(halfTaxTotal), boldStyle),
+        for (var g = 0; g < groups.length; g++)
+          pair('', _fmtAmount(perGroupTaxTotal), boldStyle),
         txt(_fmtAmount(invoice.taxTotal), boldStyle, pw.Alignment.centerRight),
       ]),
     ],
@@ -769,6 +870,19 @@ class InvoiceItem {
   double get taxAmount => amount * gstRate / 100;
 }
 
+/// A single line printed under the items, above the Total: a delivery or
+/// packing charge, a discount, or a tax component.
+class AdjustmentLine {
+  const AdjustmentLine(this.label, this.amount);
+
+  /// What to print in the description column, e.g. 'Delivery Charge',
+  /// 'Less : Trade Discount' or 'CGST'.
+  final String label;
+
+  /// Signed - negative for anything deducted from the total.
+  final double amount;
+}
+
 /// All the data needed to render the invoice.
 class Invoice {
   Invoice({
@@ -796,12 +910,25 @@ class Invoice {
     this.accountNo = '',
     this.branchIfsc = '',
     this.showGstSummary = false,
+    this.interstate = false,
+    this.charges = const [],
   });
 
   /// When true, an HSN/SAC-wise tax breakup is printed below the
   /// amount-in-words line, and the amount chargeable includes GST. When
   /// false the invoice is tax-free and no summary is printed at all.
   final bool showGstSummary;
+
+  /// Interstate supplies attract a single IGST at the full rate; within a
+  /// state the same rate is split into equal CGST and SGST halves. Only
+  /// consulted when [showGstSummary] is on.
+  final bool interstate;
+
+  /// Delivery charges, discounts and the like, added (or, when negative,
+  /// deducted) after the line items. Tax here is charged on the items only,
+  /// which keeps the worked example simple - a real invoice would decide
+  /// per charge whether it is itself taxable.
+  final List<AdjustmentLine> charges;
 
   final String sellerName;
   final String sellerAddress;
@@ -840,8 +967,30 @@ class Invoice {
       ? items.fold<double>(0, (sum, item) => sum + item.taxAmount)
       : 0;
 
-  /// What the buyer actually owes: taxable value plus any GST.
-  double get amountChargeable => grandTotal + taxTotal;
+  /// Net of every charge and discount in [charges].
+  double get chargesTotal =>
+      charges.fold<double>(0, (sum, line) => sum + line.amount);
+
+  /// The tax components as they are printed under the items: one IGST line
+  /// interstate, or an equal CGST/SGST pair within a state.
+  List<AdjustmentLine> get taxLines {
+    if (taxTotal == 0) {
+      return const [];
+    }
+    return interstate
+        ? [AdjustmentLine('IGST', taxTotal)]
+        : [
+            AdjustmentLine('CGST', taxTotal / 2),
+            AdjustmentLine('SGST', taxTotal / 2),
+          ];
+  }
+
+  /// Everything printed between the last item and the Total, in order.
+  List<AdjustmentLine> get adjustmentLines => [...charges, ...taxLines];
+
+  /// What the buyer actually owes: line items, plus charges and discounts,
+  /// plus any GST.
+  double get amountChargeable => grandTotal + chargesTotal + taxTotal;
 
   /// The GST summary's rows: one per distinct (HSN/SAC, rate) pair, in the
   /// order those pairs first appear in [items].
@@ -882,6 +1031,8 @@ class GstSummaryLine {
 Invoice _sampleInvoice({
   required int itemCount,
   required bool showGstSummary,
+  required bool interstate,
+  required bool withCharges,
 }) {
   // The HSN codes and rates are only consulted when showGstSummary is on:
   // biscuits are 1905 at 18%, the boxed assortments 2106 at 12%, so the
@@ -920,6 +1071,13 @@ Invoice _sampleInvoice({
     branchIfsc: 'M.G.Road & KKBK0008066',
     items: items,
     showGstSummary: showGstSummary,
+    interstate: interstate,
+    charges: withCharges
+        ? const [
+            AdjustmentLine('Delivery Charge', 250),
+            AdjustmentLine('Less : Trade Discount', -500),
+          ]
+        : const [],
   );
 }
 

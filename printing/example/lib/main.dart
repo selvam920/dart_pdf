@@ -18,7 +18,9 @@ enum _Demo {
   invoiceSinglePage('Invoice (1 page)'),
   invoiceTwoPages('Invoice (2 pages)'),
   invoiceFourPages('Invoice (4 pages)'),
-  invoiceGst('Invoice (GST summary)'),
+  invoiceGst('Invoice (GST, CGST + SGST)'),
+  invoiceIgst('Invoice (GST, interstate IGST)'),
+  invoiceCharges('Invoice (GST + delivery/discount)'),
   invoiceGstFourPages('Invoice (GST, 4 pages)');
 
   const _Demo(this.label);
@@ -71,11 +73,15 @@ class _MyAppState extends State<MyApp> {
       case _Demo.invoiceTwoPages:
         return generateInvoice(format, itemCount: 45);
       case _Demo.invoiceFourPages:
-        return generateInvoice(format, itemCount: 95);
+        return generateInvoice(format, itemCount: 94);
       case _Demo.invoiceGst:
         return generateInvoice(format, showGstSummary: true);
+      case _Demo.invoiceIgst:
+        return generateInvoice(format, showGstSummary: true, interstate: true);
+      case _Demo.invoiceCharges:
+        return generateInvoice(format, showGstSummary: true, withCharges: true);
       case _Demo.invoiceGstFourPages:
-        return generateInvoice(format, itemCount: 95, showGstSummary: true);
+        return generateInvoice(format, itemCount: 94, showGstSummary: true);
     }
   }
 }
