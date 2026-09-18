@@ -21,10 +21,11 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+
 android {
     namespace 'net.nfet.printing_demo'
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "30.0.16248370"
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
