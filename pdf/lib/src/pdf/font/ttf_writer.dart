@@ -79,8 +79,75 @@ class TtfWriter {
     return offset + ((align - (offset % align)) % align);
   }
 
+  /// Build a `(3, 1)` format 4 cmap subtable mapping Unicode codepoints to
+  /// glyph indexes.
+  ///
+  /// A simple `/TrueType` font is resolved through this table, so a subset
+  /// used on that path has to carry a real one. The CID path does not look at
+  /// the cmap at all and keeps the placeholder built by [withChars].
+  Uint8List _buildCmap31(Map<int, int> unicodeToGlyph) {
+    // Collapse the mapping into segments of consecutive codepoints sharing a
+    // single delta, which is what an idRangeOffset of 0 encodes.
+    final codes = unicodeToGlyph.keys.where((c) => c <= 0xFFFF).toList()
+      ..sort();
+    final startCodes = <int>[];
+    final endCodes = <int>[];
+    final deltas = <int>[];
+
+    for (final code in codes) {
+      final delta = (unicodeToGlyph[code]! - code) & 0xFFFF;
+      if (startCodes.isNotEmpty &&
+          endCodes.last == code - 1 &&
+          deltas.last == delta) {
+        endCodes[endCodes.length - 1] = code;
+        continue;
+      }
+      startCodes.add(code);
+      endCodes.add(code);
+      deltas.add(delta);
+    }
+
+    // The format requires a final segment terminating at 0xFFFF.
+    startCodes.add(0xFFFF);
+    endCodes.add(0xFFFF);
+    deltas.add(1);
+
+    final segCount = startCodes.length;
+    final len = 16 + segCount * 8;
+    final data = ByteData(len);
+
+    var pot = 1;
+    var entrySelector = 0;
+    while (pot * 2 <= segCount) {
+      pot *= 2;
+      entrySelector++;
+    }
+
+    data.setUint16(0, 4); // format
+    data.setUint16(2, len); // length
+    data.setUint16(4, 0); // language
+    data.setUint16(6, segCount * 2); // segCountX2
+    data.setUint16(8, pot * 2); // searchRange
+    data.setUint16(10, entrySelector);
+    data.setUint16(12, segCount * 2 - pot * 2); // rangeShift
+
+    for (var i = 0; i < segCount; i++) {
+      data.setUint16(14 + i * 2, endCodes[i]);
+      // 16 + segCount * 2 skips endCode[] and the reserved pad.
+      data.setUint16(16 + segCount * 2 + i * 2, startCodes[i]);
+      data.setUint16(16 + segCount * 4 + i * 2, deltas[i]);
+      data.setUint16(16 + segCount * 6 + i * 2, 0); // idRangeOffset
+    }
+
+    return data.buffer.asUint8List();
+  }
+
   /// Write this list of glyphs
-  Uint8List withChars(List<int> chars) {
+  ///
+  /// [unicodeToGlyph] maps a Unicode codepoint to one of the glyph indexes in
+  /// [chars]. When it is given, the subset carries a real `(3, 1)` cmap built
+  /// from it instead of the placeholder the CID path uses.
+  Uint8List withChars(List<int> chars, {Map<int, int>? unicodeToGlyph}) {
     final tables = <String, Uint8List>{};
     final tablesLength = <String, int>{};
 
@@ -149,6 +216,12 @@ class TtfWriter {
     }
 
     glyphsInfo.addAll(glyphsMap.values);
+
+    // Position in [glyphsInfo] is the glyph's index in the subset.
+    final newIndexes = <int, int>{};
+    for (var i = 0; i < glyphsInfo.length; i++) {
+      newIndexes[glyphsInfo[i].index] = i;
+    }
 
     // Add compound glyphs
     for (final compound in compounds.keys) {
@@ -294,24 +367,48 @@ class TtfWriter {
 
     {
       // CMAP table
-      const len = 40;
-      final cmap = Uint8List(_wordAlign(len));
-      final cmapData = cmap.buffer.asByteData();
-      cmapData.setUint16(0, 0); // Table version number
-      cmapData.setUint16(2, 1); // Number of encoding tables that follow.
-      cmapData.setUint16(4, 3); // Platform ID
-      cmapData.setUint16(6, 10); // Platform-specific encoding ID
-      cmapData.setUint32(8, 12); // Offset from beginning of table
-      cmapData.setUint16(12, 12); // Table format
-      cmapData.setUint32(16, 28); // Table length
-      cmapData.setUint32(20, 1); // Table language
-      cmapData.setUint32(24, 1); // numGroups
-      cmapData.setUint32(28, 32); // startCharCode
-      cmapData.setUint32(32, chars.length + 31); // endCharCode
-      cmapData.setUint32(36, 0); // startGlyphID
+      if (unicodeToGlyph != null) {
+        final mapped = <int, int>{};
+        unicodeToGlyph.forEach((codepoint, glyph) {
+          final index = newIndexes[glyph];
+          if (index != null) {
+            mapped[codepoint] = index;
+          }
+        });
 
-      tables[TtfParser.cmap_table] = cmap;
-      tablesLength[TtfParser.cmap_table] = len;
+        final subTable = _buildCmap31(mapped);
+        final len = 12 + subTable.lengthInBytes;
+        final cmap = Uint8List(_wordAlign(len));
+        final cmapData = cmap.buffer.asByteData();
+        cmapData.setUint16(0, 0); // Table version number
+        cmapData.setUint16(2, 1); // Number of encoding tables that follow.
+        cmapData.setUint16(4, 3); // Platform ID: Microsoft
+        cmapData.setUint16(6, 1); // Platform-specific encoding ID: Unicode
+        cmapData.setUint32(8, 12); // Offset from beginning of table
+        cmap.setRange(12, 12 + subTable.lengthInBytes, subTable);
+
+        tables[TtfParser.cmap_table] = cmap;
+        tablesLength[TtfParser.cmap_table] = len;
+      } else {
+        const len = 40;
+        final cmap = Uint8List(_wordAlign(len));
+        final cmapData = cmap.buffer.asByteData();
+        cmapData.setUint16(0, 0); // Table version number
+        cmapData.setUint16(2, 1); // Number of encoding tables that follow.
+        cmapData.setUint16(4, 3); // Platform ID
+        cmapData.setUint16(6, 10); // Platform-specific encoding ID
+        cmapData.setUint32(8, 12); // Offset from beginning of table
+        cmapData.setUint16(12, 12); // Table format
+        cmapData.setUint32(16, 28); // Table length
+        cmapData.setUint32(20, 1); // Table language
+        cmapData.setUint32(24, 1); // numGroups
+        cmapData.setUint32(28, 32); // startCharCode
+        cmapData.setUint32(32, chars.length + 31); // endCharCode
+        cmapData.setUint32(36, 0); // startGlyphID
+
+        tables[TtfParser.cmap_table] = cmap;
+        tablesLength[TtfParser.cmap_table] = len;
+      }
     }
 
     {

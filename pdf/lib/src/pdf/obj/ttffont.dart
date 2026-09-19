@@ -110,17 +110,41 @@ class PdfTtfFont extends PdfFont {
   }
 
   void _buildTrueType(PdfDict params) {
-    int charMin;
-    int charMax;
+    const charMin = 32;
+    const charMax = 255;
 
-    file.buf.putBytes(font.bytes.buffer
-        .asUint8List(font.bytes.offsetInBytes, font.bytes.lengthInBytes));
-    file.params['/Length1'] = PdfNum(font.bytes.lengthInBytes);
+    // A simple font addresses glyphs through single byte codes, so only the
+    // glyphs those codes reach can ever be drawn. Embedding the whole file
+    // instead meant a CJK font contributed megabytes of glyphs this path
+    // cannot select.
+    //
+    // The codes are written by PdfFont.putText as latin1, and /Widths below
+    // is built the same way, so the subset maps each code to the glyph the
+    // declared width belongs to.
+    final unicodeToGlyph = <int, int>{};
+    for (var i = charMin; i <= charMax; i++) {
+      final glyph = font.charToGlyphIndexMap[i];
+      if (glyph != null) {
+        unicodeToGlyph[i] = glyph;
+      }
+    }
+
+    final glyphs = unicodeToGlyph.values.toSet().toList();
+    if (glyphs.isEmpty) {
+      // Nothing in this font is reachable through a single byte code. Keep a
+      // valid font by emitting .notdef alone rather than an empty glyf table.
+      glyphs.add(0);
+    }
+
+    final data = TtfWriter(font).withChars(
+      glyphs,
+      unicodeToGlyph: unicodeToGlyph,
+    );
+    file.buf.putBytes(data);
+    file.params['/Length1'] = PdfNum(data.length);
 
     params['/BaseFont'] = PdfName('/$fontName');
     params['/FontDescriptor'] = descriptor.ref();
-    charMin = 32;
-    charMax = 255;
     for (var i = charMin; i <= charMax; i++) {
       widthsObject.params.add(
         PdfNum((glyphMetrics(i).advanceWidth * 1000.0).toInt()),
