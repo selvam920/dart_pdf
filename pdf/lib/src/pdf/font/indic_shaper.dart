@@ -351,32 +351,132 @@ Map<String, FeatureRecord> getFeatureMap(TtfParser font) {
   return features;
 }
 
-List<int> indicShaper(List<int> glyphIndexes, TtfParser font,
-    [List<int>? codepoints]) {
-  final lang = getLang(font.fontName);
-  if (isIndicShaperSupported(lang)) {
-    // If codepoints are provided, do Unicode-level reordering first,
-    // then re-map to glyph IDs
-    if (codepoints != null) {
-      final reordered = _reorderCodepoints(codepoints);
-      glyphIndexes = reordered
-          .map((cp) => font.charToGlyphIndexMap[cp] ?? 0)
-          .toList();
-    }
+/// The Indic script a single codepoint belongs to, or an empty string when it
+/// is not part of one of the supported scripts.
+///
+/// The ten supported scripts occupy one contiguous Unicode block each, from
+/// Devanagari at U+0900 through Sinhala at U+0DFF.
+String getLangFromCodepoint(int codepoint) {
+  if (codepoint < 0x0900 || codepoint > 0x0DFF) {
+    return '';
+  }
+  if (codepoint <= 0x097F) {
+    return 'hindi'; // Devanagari
+  }
+  if (codepoint <= 0x09FF) {
+    return 'bengali';
+  }
+  if (codepoint <= 0x0A7F) {
+    return 'gurmukhi';
+  }
+  if (codepoint <= 0x0AFF) {
+    return 'gujarati';
+  }
+  if (codepoint <= 0x0B7F) {
+    return 'oriya';
+  }
+  if (codepoint <= 0x0BFF) {
+    return 'tamil';
+  }
+  if (codepoint <= 0x0C7F) {
+    return 'telugu';
+  }
+  if (codepoint <= 0x0CFF) {
+    return 'kannada';
+  }
+  if (codepoint <= 0x0D7F) {
+    return 'malayalam';
+  }
+  return 'sinhala';
+}
 
-    final features = getFeatureMap(font);
-    final stages = setupStages();
-    for (var stage in stages) {
-      final glyphIterator = GlyphIterator(font, glyphIndexes);
-      if (stage is Function(List<int>, String)) {
-        glyphIndexes = stage(glyphIndexes, lang);
-      } else if (stage is List<String>) {
-        final ot = OTProcessor(font, glyphIterator);
-        final lookups = ot.lookupsForFeatures(stage, features);
-        ot.applyLookups(lookups);
-        glyphIndexes = ot.glyphIterator.glyphs.map((g) => g.id).toList();
-      }
+/// The script of the first Indic character in [codepoints], or an empty
+/// string when the text contains none.
+String getLangForText(List<int> codepoints) {
+  for (final codepoint in codepoints) {
+    final lang = getLangFromCodepoint(codepoint);
+    if (lang.isNotEmpty) {
+      return lang;
     }
   }
-  return glyphIndexes;
+  return '';
+}
+
+/// Per-font memos, held in an [Expando] so they are collected along with the
+/// font rather than pinning it in a global map for the life of the isolate.
+final _fontLangCache = Expando<String>('indicShaper.lang');
+final _featureMapCache =
+    Expando<Map<String, FeatureRecord>>('indicShaper.features');
+final _shapeCache = Expando<Map<String, List<int>>>('indicShaper.shaped');
+
+/// The stage list is the same for every font and every run, so build it once
+/// instead of rebuilding twenty entries per shaped string.
+final List<dynamic> _stages = setupStages();
+
+/// Upper bound on memoised results per font, so that a document made of
+/// entirely distinct strings cannot grow the cache without limit.
+const _shapeCacheLimit = 4096;
+
+/// Shape [glyphIndexes] for an Indic script.
+///
+/// [codepoints] is the original text; when it is given the glyph indexes are
+/// recomputed from it after reordering, so the result depends only on the text
+/// and the font. That makes it safe to memoise, which matters because the
+/// layout engine shapes every string at least twice — once to measure it in
+/// `stringMetrics` and once to write it in `putText`.
+///
+/// The returned list is shared with the cache. Callers must not modify it.
+List<int> indicShaper(List<int> glyphIndexes, TtfParser font,
+    [List<int>? codepoints]) {
+  // Pick the script from the text rather than from the font name. Latin runs
+  // then skip the pipeline entirely instead of paying for twenty substitution
+  // stages that cannot match, and Indic text is shaped correctly even in a
+  // font whose name does not happen to mention the script.
+  final lang = codepoints != null
+      ? getLangForText(codepoints)
+      : (_fontLangCache[font] ??= getLang(font.fontName));
+
+  // Without a GSUB table there are no lookups to apply, and getFeatureMap
+  // would dereference it.
+  if (!isIndicShaperSupported(lang) || font.gsub == null) {
+    return glyphIndexes;
+  }
+
+  final cache = _shapeCache[font] ??= <String, List<int>>{};
+  // The two key spaces are tagged apart so a glyph-index key can never
+  // collide with a codepoint key.
+  final key = codepoints != null
+      ? 'c${String.fromCharCodes(codepoints)}'
+      : 'g${String.fromCharCodes(glyphIndexes)}';
+  final cached = cache[key];
+  if (cached != null) {
+    return cached;
+  }
+
+  var glyphs = glyphIndexes;
+
+  // If codepoints are provided, do Unicode-level reordering first,
+  // then re-map to glyph IDs
+  if (codepoints != null) {
+    final reordered = _reorderCodepoints(codepoints);
+    glyphs = reordered.map((cp) => font.charToGlyphIndexMap[cp] ?? 0).toList();
+  }
+
+  final features = _featureMapCache[font] ??= getFeatureMap(font);
+  for (final stage in _stages) {
+    final glyphIterator = GlyphIterator(font, glyphs);
+    if (stage is Function(List<int>, String)) {
+      glyphs = stage(glyphs, lang);
+    } else if (stage is List<String>) {
+      final ot = OTProcessor(font, glyphIterator);
+      final lookups = ot.lookupsForFeatures(stage, features);
+      ot.applyLookups(lookups);
+      glyphs = ot.glyphIterator.glyphs.map((g) => g.id).toList();
+    }
+  }
+
+  if (cache.length < _shapeCacheLimit) {
+    cache[key] = glyphs;
+  }
+  return glyphs;
 }
