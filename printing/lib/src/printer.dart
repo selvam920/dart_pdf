@@ -33,15 +33,26 @@ class Printer {
        isAvailable = isAvailable ?? true;
 
   /// Create an information object from a dictionnary
-  factory Printer.fromMap(Map<dynamic, dynamic> map) => Printer(
-    url: map['url'],
-    name: map['name'],
-    model: map['model'],
-    location: map['location'],
-    comment: map['comment'],
-    isDefault: map['default'],
-    isAvailable: map['available'],
-  );
+  ///
+  /// A platform that reports a printer with no url — a queue with a nil URL on
+  /// iOS, a driver that returns no device name — used to throw a TypeError out
+  /// of the implicit cast to a non-nullable String. Fall back to the name, and
+  /// to an empty url only when neither is given, so listing printers cannot
+  /// fail because of one bad entry.
+  factory Printer.fromMap(Map<dynamic, dynamic> map) {
+    final url = map['url'] as String?;
+    final name = map['name'] as String?;
+
+    return Printer(
+      url: url ?? name ?? '',
+      name: name,
+      model: map['model'] as String?,
+      location: map['location'] as String?,
+      comment: map['comment'] as String?,
+      isDefault: map['default'] as bool?,
+      isAvailable: map['available'] as bool?,
+    );
+  }
 
   /// The platform specific printer identification
   final String url;
