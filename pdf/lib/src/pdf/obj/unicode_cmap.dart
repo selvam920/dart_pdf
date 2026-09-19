@@ -25,14 +25,57 @@ class PdfUnicodeCmap extends PdfObjectStream {
   /// List of characters
   final cmap = <int>[0];
 
+  /// The text each CID was produced from, as Unicode codepoints.
+  ///
+  /// [cmap] holds glyph indexes, which is what the embedded subset and the
+  /// width array are built from. They are not codepoints, and writing them
+  /// into this map as if they were makes a reader extract the font's glyph
+  /// numbering instead of the text. A CID missing from here is left unmapped,
+  /// which is the honest answer for a glyph that no codepoint produced.
+  final unicode = <int, List<int>>{};
+
   /// Protects the text from being "seen" by the PDF reader.
   final bool protect;
 
+  /// Encode codepoints as the UTF-16BE hex a `bfchar` destination expects.
+  static String _hex(List<int> codepoints) {
+    final buffer = StringBuffer();
+    for (final codepoint in codepoints) {
+      if (codepoint > 0xFFFF) {
+        final v = codepoint - 0x10000;
+        buffer.write(
+          (0xD800 + (v >> 10)).toRadixString(16).toUpperCase().padLeft(4, '0'),
+        );
+        buffer.write(
+          (0xDC00 + (v & 0x3FF))
+              .toRadixString(16)
+              .toUpperCase()
+              .padLeft(4, '0'),
+        );
+      } else {
+        buffer.write(codepoint.toRadixString(16).toUpperCase().padLeft(4, '0'));
+      }
+    }
+    return buffer.toString();
+  }
+
   @override
   void prepare() {
-    if (protect) {
-      cmap.fillRange(1, cmap.length, 0x20);
+    final entries = <int, String>{};
+
+    if (unicode.isEmpty) {
+      // Nothing recorded the source text, so read [cmap] as codepoints the way
+      // this object always did.
+      for (var key = 0; key < cmap.length; key++) {
+        entries[key] = protect && key > 0 ? '0020' : _hex(<int>[cmap[key]]);
+      }
+    } else {
+      for (final entry in unicode.entries) {
+        entries[entry.key] = protect ? '0020' : _hex(entry.value);
+      }
     }
+
+    final keys = entries.keys.toList()..sort();
 
     buf.putString(
       '/CIDInit/ProcSet\nfindresource begin\n'
@@ -47,19 +90,23 @@ class PdfUnicodeCmap extends PdfObjectStream {
       '/CMapType 2 def\n'
       '1 begincodespacerange\n'
       '<0000> <FFFF>\n'
-      'endcodespacerange\n'
-      '${cmap.length} beginbfchar\n',
+      'endcodespacerange\n',
     );
 
-    for (var key = 0; key < cmap.length; key++) {
-      final value = cmap[key];
-      buf.putString(
-        '<${key.toRadixString(16).toUpperCase().padLeft(4, '0')}> <${value.toRadixString(16).toUpperCase().padLeft(4, '0')}>\n',
-      );
+    // A bfchar section may hold at most 100 entries.
+    for (var start = 0; start < keys.length; start += 100) {
+      final chunk = keys.skip(start).take(100).toList();
+      buf.putString('${chunk.length} beginbfchar\n');
+      for (final key in chunk) {
+        buf.putString(
+          '<${key.toRadixString(16).toUpperCase().padLeft(4, '0')}> '
+          '<${entries[key]}>\n',
+        );
+      }
+      buf.putString('endbfchar\n');
     }
 
     buf.putString(
-      'endbfchar\n'
       'endcmap\n'
       'CMapName currentdict /CMap defineresource pop\n'
       'end\n'

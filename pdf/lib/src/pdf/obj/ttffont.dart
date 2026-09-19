@@ -196,12 +196,25 @@ class PdfTtfFont extends PdfFont {
     final codepoints = text.runes.toList();
     charIndexes = indicShaper(charIndexes, font, codepoints);
 
+    // The CIDs written below are glyph indexes, so /ToUnicode has to be told
+    // separately what text each one came from. Shaping can merge or reorder
+    // glyphs; when it left the count alone the correspondence is still
+    // positional, otherwise fall back to asking the font which codepoint
+    // reaches the glyph.
+    final aligned = charIndexes.length == codepoints.length;
+
     stream.putByte(0x3c);
-    for (final rune in charIndexes) {
+    for (var i = 0; i < charIndexes.length; i++) {
+      final rune = charIndexes[i];
       var char = unicodeCMap.cmap.indexOf(rune);
       if (char == -1) {
         char = unicodeCMap.cmap.length;
         unicodeCMap.cmap.add(rune);
+
+        final source = aligned ? codepoints[i] : _codepointForGlyph(rune);
+        if (source != null) {
+          unicodeCMap.unicode[char] = <int>[source];
+        }
       }
 
       stream.putBytes(latin1.encode(char.toRadixString(16).padLeft(4, '0')));
@@ -230,5 +243,19 @@ class PdfTtfFont extends PdfFont {
 
   List<int> getCharIndexes(Runes chars) {
     return chars.map((char) => font.charToGlyphIndexMap[char] ?? 0).toList();
+  }
+
+  Map<int, int>? _glyphToCodepoint;
+
+  /// A codepoint that reaches [glyph] through the font's cmap, if any.
+  ///
+  /// Several codepoints can share a glyph, in which case any of them describes
+  /// it well enough for text extraction.
+  int? _codepointForGlyph(int glyph) {
+    final map = _glyphToCodepoint ??= <int, int>{
+      for (final entry in font.charToGlyphIndexMap.entries)
+        entry.value: entry.key,
+    };
+    return map[glyph];
   }
 }
