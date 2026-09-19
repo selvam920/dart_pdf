@@ -1,4 +1,3 @@
-import 'package:collection/collection.dart';
 import 'glyph_info.dart';
 import 'glyph_iterator.dart';
 import 'gsub_parser.dart';
@@ -187,28 +186,33 @@ class OTProcessor {
 /* Ligature Substitution */
 
   bool doLigatureSet(LigatureSet ligature) {
-    final i = glyphIterator.index;
-    for (var l in ligature.ligatures) {
+    for (final l in ligature.ligatures) {
       final matched = sequenceMatchIndices(1, l.components);
-      if ((matched is List && matched.isEmpty) || matched == false) {
+      if (matched is! List<int> || matched.isEmpty) {
         continue;
       }
-      if (i + l.components.length < glyphIterator.glyphIds.length &&
-          const ListEquality().equals(
-              glyphIterator.glyphIds
-                  .sublist(i + 1, i + 1 + l.components.length),
-              l.components)) {
-        final newGlyph = GlyphInfo(font, l.glyph);
-        newGlyph.isLigated = true;
-        newGlyph.substituted = true;
-        glyphIterator.glyphs = [
-          ...glyphIterator.glyphs.sublist(0, i),
-          newGlyph,
-          ...glyphIterator.glyphs.sublist(i + l.components.length + 1)
-        ];
-        glyphIterator.glyphIds = glyphIterator.glyphs.map((g) => g.id).toList();
-        return true;
+
+      // `matched` holds the positions the glyph iterator actually matched,
+      // which are not necessarily contiguous: the lookup flags let it skip
+      // over marks and other ignored glyphs sitting between the components.
+      // Comparing a raw slice of the glyph list instead would miss every
+      // ligature that has a mark inside it.
+      final ligatureGlyph = GlyphInfo(font, l.glyph);
+      ligatureGlyph.isLigated = true;
+      ligatureGlyph.substituted = true;
+
+      final glyphs = List<GlyphInfo>.from(glyphIterator.glyphs);
+      glyphs[glyphIterator.index] = ligatureGlyph;
+
+      // Drop the components from the highest index down so the lower
+      // indices stay valid while removing.
+      final positions = List<int>.from(matched)..sort();
+      for (var i = positions.length - 1; i >= 0; i--) {
+        glyphs.removeAt(positions[i]);
       }
+
+      glyphIterator.glyphs = glyphs;
+      return true;
     }
     return false;
   }
@@ -220,7 +224,6 @@ class OTProcessor {
         return false;
       }
 
-      // TODO: Ligature substitution is simplified
       return doLigatureSet(table.ligatureSet[index]);
     }
     return false;

@@ -7,7 +7,6 @@ class GlyphIterator {
     glyphIds = glyphIndexes;
     reset(options);
   }
-  List<int> _glyphIds = [];
   List<GlyphInfo> glyphs = [];
   LookupFlag? options;
   int index = 0;
@@ -15,17 +14,20 @@ class GlyphIterator {
   int markAttachmentType = 0;
   late TtfParser font;
 
-  List<int> get glyphIds => _glyphIds;
+  /// Derived from [glyphs] instead of being cached, because a substitution
+  /// rewrites a glyph id in place and a cached copy would go stale.
+  List<int> get glyphIds => glyphs.map((g) => g.id).toList();
 
   set glyphIds(List<int> val) {
-    _glyphIds = val;
-    glyphs = _glyphIds.map((int glyphId) => GlyphInfo(font, glyphId)).toList();
+    glyphs = val.map((int glyphId) => GlyphInfo(font, glyphId)).toList();
   }
 
   GlyphInfo get cur => glyphs[index];
 
   void reset(LookupFlag? options, [int i = 0]) {
-    options = options;
+    // Assigning to the field, not to the parameter: nested lookups read
+    // `options` back to restore the flags of the lookup they interrupted.
+    this.options = options;
     flags = options?.flags;
     markAttachmentType = options?.markAttachmentType ?? 0;
     index = i;
