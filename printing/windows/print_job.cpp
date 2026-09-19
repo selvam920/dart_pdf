@@ -306,7 +306,10 @@ bool PrintJob::printPdf(const std::string& name,
           GlobalFree(pd.hDevNames);
         if (pd.hDevMode)
           GlobalFree(pd.hDevMode);
-        return true;
+        // False, so the caller disposes of this job. Returning true left one
+        // PrintJob behind for every cancelled print. Dart does not read this
+        // value; it waits on the onCompleted sent just above.
+        return false;
       }
 
       hDC = pd.hDC;
@@ -316,6 +319,12 @@ bool PrintJob::printPdf(const std::string& name,
   } else {
     hDC = CreateDC(TEXT("WINSPOOL"), fromUtf8(printer).c_str(), nullptr, dm);
     if (!hDC) {
+      // A named printer that cannot be opened — renamed, removed, or offline.
+      // Returning without reporting left the Dart Future pending forever.
+      if (dm) {
+        GlobalFree(dm);
+      }
+      printing->onCompleted(this, false, "Unable to open the printer");
       return false;
     }
     hDevMode = dm;
@@ -409,7 +418,14 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
   auto docName = fromUtf8(documentName);
   docInfo.lpszDocName = docName.c_str();
 
-  auto r = StartDoc(hDC, &docInfo);
+  // StartDoc fails when the spooler refuses the job: printer offline, access
+  // denied, out of disk. Everything below would then draw into a dead DC and
+  // the job would still be reported to Dart as printed.
+  if (StartDoc(hDC, &docInfo) <= 0) {
+    releaseHandles();
+    printing->onCompleted(this, false, "Unable to start the print job");
+    return;
+  }
 
   auto doc = FPDF_LoadMemDocument64(data.data(), data.size(), nullptr);
   if (!doc) {
@@ -418,9 +434,7 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
     // half-open job is left in the queue, release the handles like the success
     // path below does, and report the failure.
     AbortDoc(hDC);
-    DeleteDC(hDC);
-    GlobalFree(hDevNames);
-    GlobalFree(hDevMode);
+    releaseHandles();
     printing->onCompleted(this, false, "Cannot print a malformed PDF file");
     return;
   }
@@ -428,6 +442,7 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
   auto pages = FPDF_GetPageCount(doc);
   auto marginLeft = GetDeviceCaps(hDC, PHYSICALOFFSETX);
   auto marginTop = GetDeviceCaps(hDC, PHYSICALOFFSETY);
+  auto failure = std::string{};
 
   for (auto pageNum = 0; pageNum < pages; pageNum++) {
     auto page = FPDF_LoadPage(doc, pageNum);
@@ -463,7 +478,11 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
       dpiY = static_cast<double>(GetDeviceCaps(hDC, LOGPIXELSY)) / pdfDpi;
     }
 
-    StartPage(hDC);
+    if (StartPage(hDC) <= 0) {
+      FPDF_ClosePage(page);
+      failure = "The printer rejected a page";
+      break;
+    }
 
     // Get the printer's actual printable area (in device pixels)
     auto printableWidthPx = GetDeviceCaps(hDC, HORZRES);
@@ -493,21 +512,60 @@ void PrintJob::writeJob(std::vector<uint8_t> data) {
     FPDF_RenderPage(hDC, page, -marginLeft, -marginTop, bWidth, bHeight, 0,
                     FPDF_ANNOT | FPDF_PRINTING);
     FPDF_ClosePage(page);
-    r = EndPage(hDC);
+
+    if (EndPage(hDC) <= 0) {
+      failure = "The printer rejected a page";
+      break;
+    }
   }
 
   FPDF_CloseDocument(doc);
 
-  EndDoc(hDC);
+  if (!failure.empty()) {
+    // Drop the half-written job rather than spooling a truncated document.
+    AbortDoc(hDC);
+    releaseHandles();
+    printing->onCompleted(this, false, failure);
+    return;
+  }
 
-  DeleteDC(hDC);
-  GlobalFree(hDevNames);
-  GlobalFree(hDevMode);
+  // EndDoc is where a spooler failure usually surfaces, so it decides whether
+  // this job actually printed.
+  const auto ended = EndDoc(hDC);
+  releaseHandles();
+
+  if (ended <= 0) {
+    printing->onCompleted(this, false, "Unable to finish the print job");
+    return;
+  }
 
   printing->onCompleted(this, true, "");
 }
 
-void PrintJob::cancelJob(const std::string& error) {}
+void PrintJob::releaseHandles() {
+  if (hDC) {
+    DeleteDC(hDC);
+    hDC = nullptr;
+  }
+  if (hDevNames) {
+    GlobalFree(hDevNames);
+    hDevNames = nullptr;
+  }
+  if (hDevMode) {
+    GlobalFree(hDevMode);
+    hDevMode = nullptr;
+  }
+}
+
+void PrintJob::cancelJob(const std::string& error) {
+  // Reached when the Dart layout callback fails or is never answered. Without
+  // reporting completion the Future on the Dart side waits forever.
+  if (hDC) {
+    AbortDoc(hDC);
+  }
+  releaseHandles();
+  printing->onCompleted(this, false, error);
+}
 
 bool PrintJob::sharePdf(std::vector<uint8_t> data, const std::string& name) {
   TCHAR lpTempPathBuffer[MAX_PATH];
@@ -524,7 +582,14 @@ bool PrintJob::sharePdf(std::vector<uint8_t> data, const std::string& name) {
   output_file.write(data.data(), data.size());
   output_file.close();
 
+  // A full or read-only temp directory leaves nothing to open, and handing
+  // ShellExecuteEx a missing path pops an error dialog at the user.
+  if (!output_file) {
+    return false;
+  }
+
   SHELLEXECUTEINFO ShExecInfo;
+  ZeroMemory(&ShExecInfo, sizeof(ShExecInfo));
   ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
   ShExecInfo.fMask = 0;
   ShExecInfo.hwnd = nullptr;
@@ -540,7 +605,63 @@ bool PrintJob::sharePdf(std::vector<uint8_t> data, const std::string& name) {
   return ret == TRUE;
 }
 
-void PrintJob::pickPrinter(void* result) {}
+void PrintJob::pickPrinter(void* result) {
+  auto methodResult =
+      reinterpret_cast<flutter::MethodResult<flutter::EncodableValue>*>(result);
+
+  PRINTDLG pd;
+  ZeroMemory(&pd, sizeof(pd));
+  pd.lStructSize = sizeof(pd);
+  pd.hwndOwner = printing->getWindow();
+  pd.Flags = PD_PRINTSETUP | PD_NOPAGENUMS | PD_NOSELECTION;
+
+  if (PrintDlg(&pd) != 1) {
+    // Cancelled. Dart reads a null result as "no printer chosen".
+    if (pd.hDC) {
+      DeleteDC(pd.hDC);
+    }
+    if (pd.hDevMode) {
+      GlobalFree(pd.hDevMode);
+    }
+    if (pd.hDevNames) {
+      GlobalFree(pd.hDevNames);
+    }
+    methodResult->Success();
+    return;
+  }
+
+  auto name = std::string{};
+  if (pd.hDevNames) {
+    auto devNames = static_cast<DEVNAMES*>(GlobalLock(pd.hDevNames));
+    if (devNames) {
+      name = toUtf8(std::wstring{reinterpret_cast<TCHAR*>(devNames) +
+                                 devNames->wDeviceOffset});
+      GlobalUnlock(pd.hDevNames);
+    }
+  }
+
+  if (pd.hDC) {
+    DeleteDC(pd.hDC);
+  }
+  if (pd.hDevMode) {
+    GlobalFree(pd.hDevMode);
+  }
+  if (pd.hDevNames) {
+    GlobalFree(pd.hDevNames);
+  }
+
+  if (name.empty()) {
+    methodResult->Success();
+    return;
+  }
+
+  // listPrinters uses the device name as the url, so a printer picked here
+  // can be passed straight back to printPdf.
+  auto map = flutter::EncodableMap{};
+  map[flutter::EncodableValue("url")] = flutter::EncodableValue(name);
+  map[flutter::EncodableValue("name")] = flutter::EncodableValue(name);
+  methodResult->Success(flutter::EncodableValue(map));
+}
 
 void PrintJob::rasterPdf(std::vector<uint8_t> data,
                          std::vector<int> pages,
@@ -575,7 +696,20 @@ void PrintJob::rasterPdf(std::vector<uint8_t> data,
     auto bWidth = static_cast<int>(width * scale);
     auto bHeight = static_cast<int>(height * scale);
 
+    // A scale small enough to round a dimension down to zero, or large enough
+    // to exhaust memory, makes FPDFBitmap_Create return null, and every call
+    // below would then dereference it.
+    if (bWidth <= 0 || bHeight <= 0) {
+      FPDF_ClosePage(page);
+      continue;
+    }
+
     auto bitmap = FPDFBitmap_Create(bWidth, bHeight, 1);
+    if (!bitmap) {
+      FPDF_ClosePage(page);
+      continue;
+    }
+
     FPDFBitmap_FillRect(bitmap, 0, 0, bWidth, bHeight, 0x00ffffff);
 
     FPDF_RenderPageBitmap(bitmap, page, 0, 0, bWidth, bHeight, 0,
@@ -583,7 +717,9 @@ void PrintJob::rasterPdf(std::vector<uint8_t> data,
 
     uint8_t* p = static_cast<uint8_t*>(FPDFBitmap_GetBuffer(bitmap));
     auto stride = FPDFBitmap_GetStride(bitmap);
-    size_t l = static_cast<size_t>(bHeight * stride);
+    // Widened before multiplying: a large page at a high scale overflows the
+    // int the product would otherwise be computed in.
+    size_t l = static_cast<size_t>(bHeight) * static_cast<size_t>(stride);
 
     // BGRA to RGBA conversion
     for (auto y = 0; y < bHeight; y++) {

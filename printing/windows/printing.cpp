@@ -100,19 +100,33 @@ class OnLayoutResult : public flutter::MethodResult<flutter::EncodableValue> {
 
  protected:
   void SuccessInternal(const flutter::EncodableValue* result) {
-    auto doc = std::get<std::vector<uint8_t>>(*result);
+    // std::get would throw std::bad_variant_access straight through the
+    // method channel if the callback returned anything but bytes.
+    const auto* doc =
+        result ? std::get_if<std::vector<uint8_t>>(result) : nullptr;
+    if (!doc) {
+      job->cancelJob("The layout callback did not return a document");
+      delete job;
+      return;
+    }
 
-    job->writeJob(doc);
+    job->writeJob(*doc);
     delete job;
   }
 
+  // These two used to drop the job without reporting anything, which left the
+  // Future on the Dart side pending for the life of the process.
   void ErrorInternal(const std::string& error_code,
                      const std::string& error_message,
                      const flutter::EncodableValue* error_details) {
+    job->cancelJob(error_message.empty() ? error_code : error_message);
     delete job;
   }
 
-  void NotImplementedInternal() { delete job; }
+  void NotImplementedInternal() {
+    job->cancelJob("The layout callback is not implemented");
+    delete job;
+  }
 };
 
 void Printing::onLayout(PrintJob* job,

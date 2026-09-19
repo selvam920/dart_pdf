@@ -36,7 +36,9 @@ struct Printer {
   const std::string model;
   const std::string location;
   const std::string comment;
-  const bool default;
+  // Not `default`: that is a keyword, and only MSVC accepts it as a member
+  // name, so the plugin would not build with clang or gcc.
+  const bool isDefault;
   const bool available;
 
   Printer(const std::string& name,
@@ -44,14 +46,14 @@ struct Printer {
           const std::string& model,
           const std::string& location,
           const std::string& comment,
-          bool default,
+          bool isDefault,
           bool available)
       : name(name),
         url(url),
         model(model),
         location(location),
         comment(comment),
-        default(default),
+        isDefault(isDefault),
         available(available) {}
 };
 
@@ -81,7 +83,11 @@ class PrintJob {
 
   void writeJob(std::vector<uint8_t> data);
 
+  /// Report the job as failed to Dart and drop anything already spooled.
   void cancelJob(const std::string& error);
+
+  /// Free the printer DC and DEVMODE/DEVNAMES blocks, once.
+  void releaseHandles();
 
   bool sharePdf(std::vector<uint8_t> data, const std::string& name);
 

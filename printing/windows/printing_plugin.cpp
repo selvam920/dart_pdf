@@ -131,7 +131,7 @@ class PrintingPlugin : public flutter::Plugin {
         mp[flutter::EncodableValue("comment")] =
             flutter::EncodableValue(printer.comment);
         mp[flutter::EncodableValue("default")] =
-            flutter::EncodableValue(printer.default);
+            flutter::EncodableValue(printer.isDefault);
         mp[flutter::EncodableValue("available")] =
             flutter::EncodableValue(printer.available);
         pl.push_back(mp);
@@ -160,6 +160,11 @@ class PrintingPlugin : public flutter::Plugin {
       auto job = std::make_unique<PrintJob>(&printing, jobNum);
       job->rasterPdf(doc, pages, scale);
       result->Success(nullptr);
+    } else if (method_call.method_name().compare("pickPrinter") == 0) {
+      // Takes ownership of the result: PrintJob completes it either with the
+      // chosen printer or with null when the dialog is cancelled.
+      auto job = std::make_unique<PrintJob>(&printing, -1);
+      job->pickPrinter(result.get());
     } else if (method_call.method_name().compare("printingInfo") == 0) {
       auto job = std::make_unique<PrintJob>(&printing, -1);
       auto map = flutter::EncodableMap{};
