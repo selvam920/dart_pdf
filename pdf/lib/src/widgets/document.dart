@@ -30,6 +30,7 @@ class Document {
     bool compress = true,
     bool verbose = false,
     PdfVersion version = PdfVersion.pdf_1_5,
+    bool simpleTrueTypeFonts = false,
     this.theme,
     String? title,
     String? author,
@@ -39,12 +40,13 @@ class Document {
     String? producer,
     XmlDocument? metadata,
   }) : document = PdfDocument(
-          pageMode: pageMode,
-          deflate: deflate,
-          compress: compress,
-          verbose: verbose,
-          version: version,
-        ) {
+         pageMode: pageMode,
+         deflate: deflate,
+         compress: compress,
+         verbose: verbose,
+         version: version,
+         simpleTrueTypeFonts: simpleTrueTypeFonts,
+       ) {
     if (title != null ||
         author != null ||
         creator != null ||
@@ -80,11 +82,11 @@ class Document {
     String? keywords,
     String? producer,
   }) : document = PdfDocument.load(
-          parser,
-          deflate: deflate,
-          compress: compress,
-          verbose: verbose,
-        ) {
+         parser,
+         deflate: deflate,
+         compress: compress,
+         verbose: verbose,
+       ) {
     if (title != null ||
         author != null ||
         creator != null ||
@@ -133,6 +135,26 @@ class Document {
   ///
   /// Returns a [Uint8List] containing the document data.
   Future<Uint8List> save({bool enableEventLoopBalancing = false}) async {
+    await _postProcess(enableEventLoopBalancing);
+
+    return await document.save(
+      enableEventLoopBalancing: enableEventLoopBalancing,
+    );
+  }
+
+  /// Writes the PDF to [output] without creating a complete in-memory copy.
+  Future<void> write(
+    PdfStream output, {
+    bool enableEventLoopBalancing = false,
+  }) async {
+    await _postProcess(enableEventLoopBalancing);
+    await document.write(
+      output,
+      enableEventLoopBalancing: enableEventLoopBalancing,
+    );
+  }
+
+  Future<void> _postProcess(bool enableEventLoopBalancing) async {
     if (!_paint) {
       final balancer = enableEventLoopBalancing ? EventLoopBalancer() : null;
       balancer?.start();
@@ -145,9 +167,5 @@ class Document {
       balancer?.stop();
       _paint = true;
     }
-
-    return await document.save(
-      enableEventLoopBalancing: enableEventLoopBalancing,
-    );
   }
 }

@@ -392,8 +392,10 @@ class TtfParser {
       final startGlyphID = bytes.getUint32(basePosition + i * 12 + 22);
 
       for (var j = startCharCode; j <= endCharCode; j++) {
-        assert(!charToGlyphIndexMap.containsKey(j) ||
-            charToGlyphIndexMap[j] == startGlyphID + j - startCharCode);
+        assert(
+          !charToGlyphIndexMap.containsKey(j) ||
+              charToGlyphIndexMap[j] == startGlyphID + j - startCharCode,
+        );
         charToGlyphIndexMap[j] = startGlyphID + j - startCharCode;
       }
     }
@@ -426,8 +428,9 @@ class TtfParser {
     final hmtxOffset = tableOffsets[hmtx_table]!;
     final unitsPerEm = this.unitsPerEm;
     final numOfLongHorMetrics = this.numOfLongHorMetrics;
-    final defaultAdvanceWidth =
-        bytes.getUint16(hmtxOffset + (numOfLongHorMetrics - 1) * 4);
+    final defaultAdvanceWidth = bytes.getUint16(
+      hmtxOffset + (numOfLongHorMetrics - 1) * 4,
+    );
 
     for (var glyphIndex = 0; glyphIndex < numGlyphs; glyphIndex++) {
       final advanceWidth = glyphIndex < numOfLongHorMetrics
@@ -435,9 +438,11 @@ class TtfParser {
           : defaultAdvanceWidth;
       final leftBearing = glyphIndex < numOfLongHorMetrics
           ? bytes.getInt16(hmtxOffset + glyphIndex * 4 + 2)
-          : bytes.getInt16(hmtxOffset +
-              numOfLongHorMetrics * 4 +
-              (glyphIndex - numOfLongHorMetrics) * 2);
+          : bytes.getInt16(
+              hmtxOffset +
+                  numOfLongHorMetrics * 4 +
+                  (glyphIndex - numOfLongHorMetrics) * 2,
+            );
       if (glyphSizes[glyphIndex] == 0) {
         glyphInfoMap[glyphIndex] = PdfFontMetrics(
           left: 0,
@@ -492,7 +497,11 @@ class TtfParser {
   }
 
   TtfGlyphInfo _readSimpleGlyph(
-      int glyph, int start, int offset, int numberOfContours) {
+    int glyph,
+    int start,
+    int offset,
+    int numberOfContours,
+  ) {
     const xIsByte = 2;
     const yIsByte = 4;
     const repeat = 8;
@@ -613,9 +622,11 @@ class TtfParser {
     final numSizes = bytes.getUint32(baseOffset + 4);
     var bitmapSize = baseOffset + 8;
 
-    for (var bitmapSizeIndex = 0;
-        bitmapSizeIndex < numSizes;
-        bitmapSizeIndex++) {
+    for (
+      var bitmapSizeIndex = 0;
+      bitmapSizeIndex < numSizes;
+      bitmapSizeIndex++
+    ) {
       // BitmapSize Record
       final indexSubTableArrayOffset = baseOffset + bytes.getUint32(bitmapSize);
       // final indexTablesSize = bytes.getUint32(bitmapSize + 4);
@@ -632,9 +643,11 @@ class TtfParser {
       // final flags = bytes.getUint8(bitmapSize + 16 + 12 * 2 + 7);
 
       var subTableArrayOffset = indexSubTableArrayOffset;
-      for (var indexSubTable = 0;
-          indexSubTable < numberOfIndexSubTables;
-          indexSubTable++) {
+      for (
+        var indexSubTable = 0;
+        indexSubTable < numberOfIndexSubTables;
+        indexSubTable++
+      ) {
         // IndexSubTableArray
         final firstGlyphIndex = bytes.getUint16(subTableArrayOffset);
         final lastGlyphIndex = bytes.getUint16(subTableArrayOffset + 2);
@@ -643,8 +656,9 @@ class TtfParser {
 
         // IndexSubHeader
         final indexFormat = bytes.getUint16(additionalOffsetToIndexSubtable);
-        final imageFormat =
-            bytes.getUint16(additionalOffsetToIndexSubtable + 2);
+        final imageFormat = bytes.getUint16(
+          additionalOffsetToIndexSubtable + 2,
+        );
         final imageDataOffset =
             pngOffset + bytes.getUint32(additionalOffsetToIndexSubtable + 4);
 
@@ -652,9 +666,12 @@ class TtfParser {
           // IndexSubTable1
 
           for (var glyph = firstGlyphIndex; glyph <= lastGlyphIndex; glyph++) {
-            final sbitOffset = imageDataOffset +
-                bytes.getUint32(additionalOffsetToIndexSubtable +
-                    (glyph - firstGlyphIndex + 2) * 4);
+            final sbitOffset =
+                imageDataOffset +
+                bytes.getUint32(
+                  additionalOffsetToIndexSubtable +
+                      (glyph - firstGlyphIndex + 2) * 4,
+                );
 
             if (imageFormat == 17) {
               final height = bytes.getUint8(sbitOffset);
@@ -665,20 +682,21 @@ class TtfParser {
               final dataLen = bytes.getUint32(sbitOffset + 5);
 
               bitmapOffsets[glyph] = TtfBitmapInfo(
-                  bytes.buffer.asUint8List(
-                    bytes.offsetInBytes + sbitOffset + 9,
-                    dataLen,
-                  ),
-                  height,
-                  width,
-                  bearingX,
-                  bearingY,
-                  advance,
-                  0,
-                  0,
-                  0,
-                  ascender,
-                  descender);
+                bytes.buffer.asUint8List(
+                  bytes.offsetInBytes + sbitOffset + 9,
+                  dataLen,
+                ),
+                height,
+                width,
+                bearingX,
+                bearingY,
+                advance,
+                0,
+                0,
+                0,
+                ascender,
+                descender,
+              );
             }
           }
         }

@@ -85,9 +85,9 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         }
         dpi =
             (min(mq.size.width - 16, widget.maxPageWidth ?? double.infinity)) *
-                dpr /
-                pageFormat.width *
-                PdfPageFormat.inch;
+            dpr /
+            pageFormat.width *
+            PdfPageFormat.inch;
       }
 
       _raster();
@@ -168,14 +168,19 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         dpi: dpi,
         pages: widget.pages,
       )) {
+        final png = await page.toPng();
+
+        // `dispose()` clears `pages`, and this resumes after the await above:
+        // `pageNum` may no longer be a valid index by the time it does.
         if (!mounted) {
           _rastering = false;
           return;
         }
+
         if (pages.length <= pageNum) {
           pages.add(
             PdfPreviewPageData(
-              image: MemoryImage(await page.toPng()),
+              image: MemoryImage(png),
               width: page.width,
               height: page.height,
             ),
@@ -183,7 +188,7 @@ mixin PdfPreviewRaster on State<PdfPreviewCustom> {
         } else {
           pages[pageNum].image.evict();
           pages[pageNum] = PdfPreviewPageData(
-            image: MemoryImage(await page.toPng()),
+            image: MemoryImage(png),
             width: page.width,
             height: page.height,
           );

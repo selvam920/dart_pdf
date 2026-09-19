@@ -40,16 +40,30 @@ import 'unicode_cmap.dart';
 class PdfTtfFont extends PdfFont {
   /// Constructs a [PdfTtfFont]
   PdfTtfFont(PdfDocument pdfDocument, ByteData bytes, {bool protect = false})
-      : font = TtfParser(bytes),
-        super.create(pdfDocument, subtype: '/TrueType') {
+    : font = TtfParser(bytes),
+      super.create(pdfDocument, subtype: '/TrueType') {
     file = PdfObjectStream(pdfDocument, isBinary: true);
     unicodeCMap = PdfUnicodeCmap(pdfDocument, protect);
     descriptor = PdfFontDescriptor(this, file);
     widthsObject = PdfObject<PdfArray>(pdfDocument, params: PdfArray());
   }
 
+  /// Whether this font should take the CID `/Type0` path.
+  ///
+  /// Reads [PdfSettings.simpleTrueTypeFonts] rather than a static, because
+  /// [PdfDocument.save] writes on a separate isolate where statics start fresh
+  /// — a static would be seen by putText() but not by prepare().
+  bool get _useType0 => font.unicode && !settings.simpleTrueTypeFonts;
+
+  /// Whether this font is written as a CID `/Type0` font.
+  ///
+  /// Consumers must key off this rather than `font.unicode`, which only reports
+  /// the sfnt version tag and stays true even when the simple `/TrueType` path
+  /// is taken. [PdfFontDescriptor] needs it to pick symbolic vs nonsymbolic.
+  bool get isCidFont => _useType0;
+
   @override
-  String get subtype => font.unicode ? '/Type0' : super.subtype;
+  String get subtype => _useType0 ? '/Type0' : super.subtype;
 
   late PdfUnicodeCmap unicodeCMap;
 
@@ -108,8 +122,9 @@ class PdfTtfFont extends PdfFont {
     charMin = 32;
     charMax = 255;
     for (var i = charMin; i <= charMax; i++) {
-      widthsObject.params
-          .add(PdfNum((glyphMetrics(i).advanceWidth * 1000.0).toInt()));
+      widthsObject.params.add(
+        PdfNum((glyphMetrics(i).advanceWidth * 1000.0).toInt()),
+      );
     }
     params['/FirstChar'] = PdfNum(charMin);
     params['/LastChar'] = PdfNum(charMax);
@@ -130,10 +145,7 @@ class PdfTtfFont extends PdfFont {
       '/BaseFont': PdfName('/$fontName'),
       '/FontFile2': file.ref(),
       '/FontDescriptor': descriptor.ref(),
-      '/W': PdfArray([
-        const PdfNum(0),
-        widthsObject.ref(),
-      ]),
+      '/W': PdfArray([const PdfNum(0), widthsObject.ref()]),
       '/CIDToGIDMap': const PdfName('/Identity'),
       '/DW': const PdfNum(1000),
       '/Subtype': const PdfName('/CIDFontType2'),
@@ -141,7 +153,7 @@ class PdfTtfFont extends PdfFont {
         '/Supplement': const PdfNum(0),
         '/Registry': PdfString.fromString('Adobe'),
         '/Ordering': PdfString.fromString('Identity-H'),
-      })
+      }),
     });
 
     params['/BaseFont'] = PdfName('/$fontName');
@@ -152,9 +164,12 @@ class PdfTtfFont extends PdfFont {
     charMin = 0;
     charMax = unicodeCMap.cmap.length - 1;
     for (var i = charMin; i <= charMax; i++) {
-      widthsObject.params.add(PdfNum(
+      widthsObject.params.add(
+        PdfNum(
           (glyphMetrics(unicodeCMap.cmap[i], true).advanceWidth * 1000.0)
-              .toInt()));
+              .toInt(),
+        ),
+      );
     }
   }
 
@@ -162,7 +177,7 @@ class PdfTtfFont extends PdfFont {
   void prepare() {
     super.prepare();
 
-    if (font.unicode) {
+    if (_useType0) {
       _buildType0(params);
     } else {
       _buildTrueType(params);
@@ -171,9 +186,10 @@ class PdfTtfFont extends PdfFont {
 
   @override
   void putText(PdfStream stream, String text) {
-    if (!font.unicode) {
-      super.putText(stream, text);
-      return;
+    if (!_useType0) {
+      // Without the return the simple encoding is emitted and then the hex CID
+      // string is appended on top of it, corrupting the text.
+      return super.putText(stream, text);
     }
 
     var charIndexes = getCharIndexes(text.runes);
